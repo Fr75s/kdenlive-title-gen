@@ -1,5 +1,7 @@
 # sample.kdenlive readthrough
 
+This document walks through the .kdenlive file generated from sample.md, documenting how a .kdenlive file is formed and how video sequences are defined.
+
 ```xml
 <?xml version='1.0' encoding='utf-8'?>
 ```
@@ -14,7 +16,7 @@ Outermost tag of the document.
 
 - LC_NUMERIC: unknown.
 - main_bin: referred to later, used to specify the main video.
-- root: The root path of all items used in the video. {{1}} is this directory. For this script, since all titles are currently in projdir, should be projdir.
+- root: The root path of all items used in the video. {{1}} is this directory. For this script, it will be the directory passed into the script (under the titles/ subdirectory).
 - version: MLT version (presumably).
 
 ```xml
@@ -27,7 +29,7 @@ Profile definition. Contains some important information that determines properti
 - `display_aspect_den` & `display_aspect_num` seem to be aspect ratio height/width.
 - `frame_rate_num` controls frame rate. No clue on `frame_rate_den`.
 - `sample_aspect_*` is unknown.
-- `description` seems to take from the presets to indicate if this is a builtin or custom profile. Likely not strictly necessary, but may be a little inconvenient.
+- `description` is the name of the current profile.
 
 ```xml
 <producer id="producer0" in="00:00:00.000" out="00:05:00.000">
@@ -673,16 +675,16 @@ The main_bin playlist starts with a bunch of properties. As they go:
 
 Until we reach the end of the `docproperties` fields, I will not add the `kdenlive:docproperties` prefix. Continuing on...
 
-- audioChannels:
-- binsort:
-- browserurl:
-- documentid:
-- enableTimelineZone:
-- enableexternalproxy:
-- enableproxy:
-- externalproxyparams: 
-- generateimageproxy: 
-- generateproxy: 
+- audioChannels: The number of Audio Channels in the Audio Mixer.
+- binsort: Likely specifies how the project bin is sorted.
+- browserurl: Path open in the Media Browser (View » Media Browser)
+- documentid: The document ID, which is just set to the number of milliseconds since the Unix Epoch.
+- enableTimelineZone: Whether or not the Timeline Zone (blue bar above the timeline) is enabled for inserting clips. See [this page](https://userbase.kde.org/Kdenlive/Manual/Timeline/Editing) or [this page](https://kdenlive.org/project/insert-overwrite-advanced-timeline-editing/) for more info.
+- enableexternalproxy: Whether or not External Proxy Clips are enabled in the project settings (0=no, 1=yes; if 1, enableproxy should be 1)
+- enableproxy: Whether or not Proxy Clips are enabled in the project settings. Proxied clips are smaller resized copies of clips.
+- externalproxyparams: String formatted version of the currently selected option under "External proxy clips"
+- generateimageproxy: Whether or not proxies are generated for large enough images
+- generateproxy: Whether or not proxies are generated for large enough videos
 
 ```xml
 	<property name="kdenlive:docproperties.guidesCategories">[
@@ -735,7 +737,7 @@ Until we reach the end of the `docproperties` fields, I will not add the `kdenli
 	</property>
 ```
 
-- guidesCategories: Specifies several colors and titles for Guides. Since our project uses no guides, this remains unused.
+- guidesCategories: Specifies several colors and titles for Guides. Since our project uses no guides, this remains unused. These can be seen in the project settings under the Guides Tab.
 
 ```xml
 	<property name="kdenlive:docproperties.kdenliveversion">24.12.0</property>
@@ -755,17 +757,17 @@ Until we reach the end of the `docproperties` fields, I will not add the `kdenli
 ```
 
 - kdenliveversion: The version of Kdenlive this project was made on.
-- previewextension:
-- previewparameters:
-- profile:
-- proxyextension:
-- proxyimageminsize:
-- proxyimagesize:
-- proxyminsize:
-- proxyparams:
-- proxyresize:
-- seekOffset: 
-- sessionid: 
+- previewextension: Selected Encoding profile for Timeline Preview (bottom of Project Settings » Settings)
+- previewparameters: Parameters for the Timeline Preview. Used in addition to encoding profile, and can be seen in Kdenlive by opening the settings gear next to the currently selected Timeline Preview.
+- profile: Identifier for the project's current profile. If it's a custom profile, it instead is a path to the custom profile.
+- proxyextension: Selected Encoding profile for Proxy Clips
+- proxyimageminsize: Width threshold to determine whether or not to proxy an image. If an image is wider than this amount (in pixels), it will be proxied.
+- proxyimagesize: Width (in pixels) to resize proxied images
+- proxyminsize: Width threshold to determine whether or not to proxy a video. If a video is wider than this amount (in pixels), it will be proxied.
+- proxyparams: Parameters for Proxy Clips. Used in addition to encoding profile, and can be seen in Kdenlive by opening the settings gear next to the currently selected Encoding Profile.
+- proxyresize: Width (in pixels) to resize proxied videos.
+- seekOffset: Duration after the end point of a Sequence which can still be seeked to (in frames)
+- sessionid: UUID generated upon opening Kdenlive (?)
 - uuid: The UUID of the document (??), identical to the UUID of our Main Sequence.
 - version: The Kdenlive document version. Currently 1.1, corresponding to "Generation 5" of the Kdenlive document format.
 
@@ -784,16 +786,16 @@ Until we reach the end of the `docproperties` fields, I will not add the `kdenli
 ```
 
 - kdenlive:expandedFolders: The numeric IDs of each folder currently opened in the project bin, separated by `;`
-- kdenlive:binZoom: 
-- kdenlive:extraBins: 
-- kdenlive:documentnotes: 
-- kdenlive:documentnotesversion: 
+- kdenlive:binZoom: Zoom level in the project bin.
+- kdenlive:extraBins: A list of all project bins. They are in the form [project_bin_id];[folder];[???], where project_bin_id is a unique string identifier for the bin, folder is the numeric folder ID of the currently open bin (with -1 being the root folder), and ??? being unknown.
+- kdenlive:documentnotes: HTML formatted notes for the project. See [this page](https://docs.kdenlive.org/en/project_and_asset_management/project_notes.html) for more info.
+- kdenlive:documentnotesversion: Version number for document notes. Currently 2.
 - kdenlive:docproperties.opensequences: The UUIDs of each sequence currently open in Kdenlive, separated by `;`
 - kdenlive:docproperties.activetimeline: The UUID of the active sequence.
 - kdenlive:folder.-1.14: Custom folder to organize our titles.
 - kdenlive:folder.14.17: Custom folder, within the titles folder, to organize our Section 1 titles.
 - kdenlive:folder.14.18: Custom folder, within the titles folder, to organize our Section 2 titles.
-- xml_retain: 
+- xml_retain: ??? (always 1??)
 
 With that, all of the properties of main_bin have been covered.
 
@@ -827,3 +829,25 @@ The final part of main_bin is to have one entry for each clip we use. Sequences 
 Finally, we specify the tractor for main_bin. `out` is the duration of our video. `kdenlive:projectTractor` specifies this is the tractor for the entire project, and the producer of the one track for this tractor is the Main Sequence's UUID.
 
 With that, we have formed our video, and can close the MLT tag to form our document.
+
+
+
+# the general process
+
+Per Sequence:
+
+- Create 3 blank tracks (2 audio, 1 video) via 6 playlists and 3 tractors
+- Create producers for all title clips
+- Create playlist for title clips + extra blank playlist
+- Create tractor for actual playlist
+- Create sequence tractor
+
+Per File
+
+- Create Sequences
+- Create Audio tractor of Main Sequence
+- Create title clip producer
+- Create playlist for video track
+- Create corresponding tractor
+- Define Main Sequence
+- Define main_bin
