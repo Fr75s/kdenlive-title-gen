@@ -16,7 +16,7 @@ FRAMERATE = 60
 
 
 # speed of each clip in words per second
-READ_SPEED = 3.0
+READ_SPEED = 2.8
 
 # duration of the title clip (the first clip) in seconds
 TITLE_DURATION = 6.0
@@ -28,7 +28,7 @@ SECTION_DURATION = 3.0
 SECTION_GAP = 1.5
 
 # gap before content clips where no text is shown
-CONTENT_GAP = 0.5
+CONTENT_GAP = 1.0
 
 # time to fade titles in/out
 TITLE_FADE_DURATION = 1.0
@@ -104,11 +104,90 @@ Y_CENTER = 860
 #
 
 from PIL import ImageFont
-import os, sys
+import os, sys, json, math, uuid, hashlib
+
+CFG_FILE = ""
+CFG_PROJDIR = ""
 
 #
 # UTILITY FUNCTIONS
 #
+
+# Rounds the given value to 3 decimal places.
+def r3(value: float) -> float:
+	return round(value * 1000.0) / 1000.0
+
+# titleclips_to_kdenlive Helpers
+
+# Pads an integer with a leading zero if it is less than 10.
+def pad2(val: int) -> str:
+	if (val < 10):
+		return f"0{val}"
+	return f"{val}"
+
+# Converts a number of frames into a timestamp in the form hh:mm:ss:ff, where ff is
+# the frame offset within a second.
+def frames_to_timestamp(frames: int) -> str:
+	seconds: int = (frames // FRAMERATE) % 60
+	minutes: int = (frames // (FRAMERATE * 60)) % 60
+	hours: int = (frames // (FRAMERATE * 3600))
+
+	return f"{pad2(hours)}:{pad2(minutes)}:{pad2(seconds)}:{pad2(frames % FRAMERATE)}"
+
+# Converts a number of seconds into a timestamp in the form hh:mm:ss.sss
+def seconds_to_timestamp(seconds: float) -> str:
+	int_sec: int = int(math.floor(seconds))
+	minutes: int = (int_sec // 60) % 60
+	hours: int = (int_sec // 3600)
+
+	print(int_sec)
+
+	return f"{pad2(hours)}:{pad2(minutes)}:{pad2(int_sec % 60)}.{str(r3(seconds - int_sec))[2:]}"
+
+# Converts a title object which refers to a .kdenlivetitle file to a MLT producer.
+def title_to_producer(title_obj: dict, projdir: str, folder_id: int, clip_id: int, producer_id: int) -> str:
+	file_hash = hashlib.md5(open(os.path.join(projdir, "titles", f"{title_obj["ref"]}.kdenlivetitle"), 'rb').read()).hexdigest()
+
+	new_uuid = uuid.uuid4()
+
+	# NOTES:
+	# producer id should be unique
+	# in/out in producer is length of clip - 1 frame
+	# length is duration in frames (integer)
+	# resource is resource reference (e.g. file)
+	# kdenlive:duration is duration in hh:mm:ss:ff, where ff is frames
+	# id should be unique ??
+	# xml was here seems useless??
+	# clip_type is always 2 for title clips, 0 for sequence clips
+	# file_hash doesn't seem to match up with hash of the file??
+	# control_uuid is just a random UUID
+
+	# kdenlive:id (& by extension clip_id) can be seen in tractors (clip_type 0) too.
+	# producer_id is only seen in producers (clip_type 2).
+
+	return f""" <producer id="producer{producer_id}" in="00:00:00.000" out="{seconds_to_timestamp(title_obj["abs_out"])}">
+  <property name="length">{title_obj["duration"]}</property>
+  <property name="eof">pause</property>
+  <property name="resource">titles/{title_obj["ref"]}.kdenlivetitle</property>
+  <property name="meta.media.progressive">1</property>
+  <property name="aspect_ratio">1</property>
+  <property name="seekable">1</property>
+  <property name="mlt_service">kdenlivetitle</property>
+  <property name="kdenlive:duration">{frames_to_timestamp(title_obj["duration"])}</property>
+  <property name="xml">was here</property>
+  <property name="kdenlive:folderid">{folder_id}</property>
+  <property name="kdenlive:id">{clip_id}</property>
+  <property name="kdenlive:control_uuid">{{{new_uuid}}}</property> ***
+  <property name="kdenlive:clip_type">2</property>
+  <property name="kdenlive:file_hash">{file_hash}</property> ***
+  <property name="force_reload">0</property>
+  <property name="meta.media.width">{RES_WIDTH}</property>
+  <property name="meta.media.height">{RES_HEIGHT}</property>
+  <property name="kdenlive:monitorPosition">0</property>
+ </producer>"""
+
+
+# clip_data_to_titleclips Helpers
 
 # Converts a color tuple to a color code, separated by comma.
 def color_code(color_tuple: tuple[int, int, int, int]) -> str:
@@ -190,25 +269,71 @@ def break_text_by_font_width(text: str, font: str, font_size: int, max_width: in
 
 # Converts a list of title clip objects to a Kdenlive project.
 # The clips will be placed in the "V2" timeline and have fade in and out effects applied.
-def titleclips_to_kdenlive(tc):
-	pass
+def titleclips_to_kdenlive(projdir):
+	# Init file
+	# NOTE: Currently this only supports 1080p60.
+	doc = f"""<?xml version='1.0' encoding='utf-8'?>
+<mlt LC_NUMERIC="C" producer="main_bin" root="{projdir}" version="7.28.0">
+	<profile colorspace="709" description="HD 1080p 60 fps" display_aspect_den="9" display_aspect_num="16" frame_rate_den="1" frame_rate_num="60" height="1080" progressive="1" sample_aspect_den="1" sample_aspect_num="1" width="1920"/>
+
+	<producer id="producer0" in="00:00:00.000" out="00:05:00.000">
+		<property name="length">2147483647</property>
+		<property name="eof">continue</property>
+		<property name="resource">black</property>
+		<property name="aspect_ratio">1</property>
+		<property name="mlt_service">color</property>
+		<property name="kdenlive:playlistid">black_track</property>
+		<property name="mlt_image_format">rgba</property>
+		<property name="set.test_audio">0</property>
+	</producer>
+		<producer id="producer1" in="00:00:00.000" out="00:05:00.000">
+		<property name="length">2147483647</property>
+		<property name="eof">continue</property>
+		<property name="resource">0</property>
+		<property name="aspect_ratio">1</property>
+		<property name="mlt_service">color</property>
+		<property name="kdenlive:playlistid">black_track</property>
+		<property name="mlt_image_format">yuv422</property>
+		<property name="set.test_audio">0</property>
+	</producer>"""
+
+	with open(os.path.join(projdir, "titles", f"layout.json"), "r") as layout_json:
+		layout = json.loads(layout_json.read())
+
+		# Prepare IDs
+		producer_id = 2
+		folder_id = 3 # Folder 2 used for Sequences
+		clip_id = 4 # ID 3 used for main_bin
+
+		current_sequence = 0
+
+		# Start going through each set of clips
+		for clip in layout[1:]:
+			print(title_to_producer(clip, projdir, folder_id, clip_id, producer_id))
+
+		# Add title clip and rearrange
 
 
 # Converts clip data into title clip objects, which feature the clip's XML definition
 # and the timestamp where the clip is to be placed.
-def clip_data_to_titleclips(cd):
+def clip_data_to_titleclips(cd, projdir):
 	tc_data = []
 	current_time = 0.0
+
+	section_idx = 0
+	content_idx = 0
+
+	if not(os.path.exists(os.path.join(projdir, "titles"))):
+		os.mkdir(os.path.join(projdir, "titles"))
 
 	for i in range(len(cd)):
 		clip = cd[i]
 		tc_entry = {}
 
+		data = ""
+
 		match clip["type"]:
 			case "title":
-				# create title clip
-				tc_entry["time"] = current_time
-
 				# get duration
 				duration = round(clip["duration"] * FRAMERATE)
 
@@ -217,7 +342,7 @@ def clip_data_to_titleclips(cd):
 				subtitle_y_pos = title_y_pos + TITLE_FONT_SIZE + TITLE_GAP
 				supertitle_y_pos = title_y_pos - TITLE_GAP - SUPERTITLE_FONT_SIZE
 
-				tc_entry["data"] = f"""<kdenlivetitle LC_NUMERIC="C" duration="{duration}" height="{RES_HEIGHT}" out="{duration}" width="{RES_WIDTH}">
+				data = f"""<kdenlivetitle LC_NUMERIC="C" duration="{duration}" height="{RES_HEIGHT}" out="{duration}" width="{RES_WIDTH}">
  <item type="QGraphicsTextItem" z-index="2">
   <position x="0" y="{subtitle_y_pos}">
    <transform>1,0,0,0,1,0,0,0,1</transform>
@@ -241,6 +366,13 @@ def clip_data_to_titleclips(cd):
  <background color="0,0,0,0"/>
 </kdenlivetitle>"""
 
+				# Set Values
+				tc_entry["start"] = r3(current_time)
+				tc_entry["out"] = r3(current_time + TITLE_DURATION - (1.0 / FRAMERATE))
+				tc_entry["ref"] = "title"
+				tc_entry["duration"] = duration
+				tc_entry["abs_out"] = r3(TITLE_DURATION - (1.0 / FRAMERATE))
+
 				# adjust time
 				current_time += TITLE_DURATION + SECTION_GAP
 			case "section":
@@ -254,7 +386,7 @@ def clip_data_to_titleclips(cd):
 
 				y_pos = RES_HEIGHT // 2 - SECTION_FONT_SIZE // 2
 
-				tc_entry["data"] = f"""<kdenlivetitle LC_NUMERIC="C" duration="{duration}" height="{RES_HEIGHT}" out="{duration}" width="{RES_WIDTH}">
+				data = f"""<kdenlivetitle LC_NUMERIC="C" duration="{duration}" height="{RES_HEIGHT}" out="{duration}" width="{RES_WIDTH}">
  <item type="QGraphicsTextItem" z-index="0">
   <position x="0" y="{y_pos}">
    <transform>1,0,0,0,1,0,0,0,1</transform>
@@ -265,6 +397,16 @@ def clip_data_to_titleclips(cd):
  <endviewport rect="0,0,{RES_WIDTH},{RES_HEIGHT}"/>
  <background color="0,0,0,0"/>
 </kdenlivetitle>"""
+
+				# Set Values
+				section_idx += 1
+				content_idx = 0
+
+				tc_entry["start"] = r3(current_time)
+				tc_entry["out"] = r3(current_time + clip["duration"] - (1.0 / FRAMERATE))
+				tc_entry["ref"] = f"section_{section_idx}"
+				tc_entry["duration"] = duration
+				tc_entry["abs_out"] = r3(clip["duration"] - (1.0 / FRAMERATE))
 
 				# adjust time
 				current_time += clip["duration"] + SECTION_GAP
@@ -280,7 +422,7 @@ def clip_data_to_titleclips(cd):
 				y_pos = Y_CENTER - round((len(lines) / 2.0) * FONT_SIZE)
 
 				# Form XML data
-				tc_entry["data"] = f"""<kdenlivetitle LC_NUMERIC="C" duration="{duration}" height="{RES_HEIGHT}" out="{duration}" width="{RES_WIDTH}">
+				data = f"""<kdenlivetitle LC_NUMERIC="C" duration="{duration}" height="{RES_HEIGHT}" out="{duration}" width="{RES_WIDTH}">
  <item type="QGraphicsTextItem" z-index="0">
   <position x="{(RES_WIDTH - MAX_CONTENT_WIDTH) // 2}" y="{y_pos}">
    <transform>1,0,0,0,1,0,0,0,1</transform>
@@ -292,14 +434,26 @@ def clip_data_to_titleclips(cd):
  <background color="0,0,0,0"/>
 </kdenlivetitle>"""
 
+				# Set Values
+				content_idx += 1
+
+				tc_entry["start"] = r3(current_time)
+				tc_entry["out"] = r3(current_time + clip["duration"] - (1.0 / FRAMERATE))
+				tc_entry["ref"] = f"content_s{section_idx}_c{content_idx}"
+				tc_entry["duration"] = duration
+				tc_entry["abs_out"] = r3(clip["duration"] - (1.0 / FRAMERATE))
+
 				# adjust time
 				current_time += clip["duration"] + CONTENT_GAP
 
-		print(tc_entry["data"])
+		with open(os.path.join(projdir, "titles", f"{tc_entry["ref"]}.kdenlivetitle"), "w") as klt:
+			if (data != ""):
+				klt.write(data)
 
 		tc_data.append(tc_entry)
 
-	return tc_data
+	with open(os.path.join(projdir, "titles", f"layout.json"), "w") as jsc:
+		jsc.write(json.dumps(tc_data))
 
 
 # Parses a markdown script file for text content.
@@ -376,10 +530,7 @@ def parse_file(f):
 				# Get duration as a function of reading speed relative to # words
 				# multiplied by a factor which shortens the clip length as longer
 				# texts are entered
-				this_clip["duration"] = (wc / READ_SPEED) * (2 ** (-0.01 * wc))
-				# Round duration to 3 digits
-				this_clip["duration"] = round(this_clip["duration"] * 1000)
-				this_clip["duration"] = this_clip["duration"] / 1000.0
+				this_clip["duration"] = r3((wc / READ_SPEED) * (2 ** (-0.01 * wc)))
 				# Add fade time
 				this_clip["duration"] += FADE_DURATION * 2
 
@@ -393,19 +544,72 @@ def parse_file(f):
 	return clip_data
 
 
+# Gets the index of the given flag in sys.argv if it exists.
+# If it does not exist, returns -1.
+#
+# shorthand: The flag's shorthand (e.g. h)
+# longhand: The flag's full name (e.g. help)
+def get_flag_idx(shorthand: str, longhand: str) -> int:
+	try:
+		return sys.argv.index(f"-{shorthand}")
+	except:
+		try:
+			return sys.argv.index(f"--{longhand}")
+		except:
+			return -1
+
+# Gets the argument for the given flag.
+# Note: This does not work for longhand arguments adjacent to the flag, e.g. --opt=2
+#
+# shorthand: The flag's shorthand (e.g. h)
+# longhand: The flag's full name (e.g. help)
+#
+# Returns the argument for this flag, as a string.
+def get_flag_arg(shorthand: str, longhand: str) -> str:
+	idx = get_flag_idx(shorthand, longhand)
+
+	# Index Check
+	if (idx == -1 or idx == len(sys.argv) - 1):
+		return ""
+
+	# Get argument
+	return sys.argv[idx + 1]
+
+
+def parse_flags():
+	if (get_flag_idx("h", "help") >= 0):
+		print("kdenlive title generator")
+		print()
+		print("Usage: python3 tgen.py [options] -f [file] -d [directory]")
+		print("Options:")
+		print("  -f\t")
+		print("  --file\tSpecify a markdown script to convert.")
+		print("  -d\t")
+		print("  --directory\tSpecify a directory to save all title clips.")
+		print("  -n\t")
+		print("  --nosave\tDo not save title clips as separate files. This will bundle all")
+		print("\t\tClips in the project itself. Not recommended unless the script is small.")
+		sys.exit()
+
 
 def main():
 	# Get script as second CLI argument.
-	if (len(sys.argv) < 2 or not os.path.isfile(sys.argv[1])):
-		print("invalid file.")
+	parse_flags()
+	CFG_FILE = get_flag_arg("f", "file")
+	CFG_PROJDIR = get_flag_arg("d", "directory")
+
+	if not os.path.isfile(CFG_FILE) or not os.path.isdir(CFG_PROJDIR):
+		print("Invalid file or directory. Both are required.")
 		sys.exit()
 
 	# Parse script
-	cdata = parse_file(sys.argv[1])
+	cdata = parse_file(CFG_FILE)
 	if (cdata == []):
-		print("invalid script!")
+		print("Invalid Markdown Script!")
 		sys.exit()
 
-	tcdata = clip_data_to_titleclips(cdata)
+	clip_data_to_titleclips(cdata, CFG_PROJDIR)
+
+	titleclips_to_kdenlive(CFG_PROJDIR)
 
 main()
