@@ -6,13 +6,13 @@ This document walks through the .kdenlive file generated from sample.md, documen
 <?xml version='1.0' encoding='utf-8'?>
 ```
 
-Standard XML Versioning.
+Standard XML Versioning. This is present in pretty much all XML documents.
 
 ```xml
 <mlt LC_NUMERIC="C" producer="main_bin" root="{{1}}" version="7.28.0">
 ```
 
-Outermost tag of the document.
+Outermost tag of the document, specifying the beginning of the actual content.
 
 - LC_NUMERIC: unknown.
 - main_bin: referred to later, used to specify the main video.
@@ -171,7 +171,7 @@ Finally, we get to an actual title producer. This defines a reference to a singl
 	- 0: Video Data (INCLUDING Sequences AND Chains)
 	- 1: Audio Data
 	- 2: Still Image Data (INCLUDING Titles, as seen here)
-- kdenlive:file_hash: Seemingly an MD5 Hash for the clip (according to the source code) except generating an MD5 hash here doesn't yield the same result...
+- kdenlive:file_hash: Seemingly an MD5 Hash for the clip (according to the source code) except generating an MD5 hash here for the file doesn't yield the same result... (more info [here](https://github.com/KDE/kdenlive/blob/db87eb236b3a995f6a8f3b081ad18cd9aeebac49/src/bin/playlistclip.cpp#L237))
 - force_reload: ???
 - meta.media.width: Width of the clip itself
 - meta.media.height: Height of the clip itself
@@ -326,7 +326,7 @@ This next tractor is for the full Sequence itself. Its job is to combine all 4 o
 - kdenlive:control_uuid: A different unique UUID for this tractor. Unused elsewhere.
 - kdenlive:id: A unique numerical ID for this tractor, much like those for our `<producer>`s.
 - kdenlive:clip_type: The same clip_type property as in our `<producer>`s, except 0 because it is a Video Source.
-- kdenlive:file_hash: I don't know why there's a file hash for a Sequence defined entirely within this file...
+- kdenlive:file_hash: The MD5 hash of the sequence's UUID, **including the curly brackets**.
 - kdenlive:folderid: Same as a `<producer>`.
 
 Then we get a *whole bunch* of `kdenlive.sequenceproperties` properties. I'll remove the prefix to make defining each of these easier.
@@ -334,8 +334,8 @@ Then we get a *whole bunch* of `kdenlive.sequenceproperties` properties. I'll re
 - activeTrack: The index of the currently active track.
 - disablepreview: Whether or not the preview is disabled (??)
 - documentuuid: The UUID of the Main Sequence.
-- hasAudio: 
-- hasVideo: 
+- hasAudio: Whether or not audio is enabled in the sequence (?)
+- hasVideo: Whether or not video is enabled in the sequence (?)
 - position: The current position of the cursor within the sequence.
 - scrollPos: Likely the vertical scroll within the sequence.
 - tracks, tracksCount: Two fields for the same value, the number of tracks within this sequence.
@@ -842,8 +842,9 @@ Per Sequence:
 - Create tractor for actual playlist
 - Create sequence tractor
 
-Per File
+Per File:
 
+- Init profile/first producer
 - Create Sequences
 - Create Audio tractor of Main Sequence
 - Create title clip producer
