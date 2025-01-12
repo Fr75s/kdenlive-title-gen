@@ -25,7 +25,7 @@ TITLE_DURATION = 6.0
 SECTION_DURATION = 3.0
 
 # gap before and after a section/title clip where no text is shown
-SECTION_GAP = 1.5
+SECTION_GAP = 2.5
 
 # gap before content clips where no text is shown
 CONTENT_GAP = 1.0
@@ -146,8 +146,6 @@ def seconds_to_timestamp(seconds: float) -> str:
 	int_sec: int = int(math.floor(seconds))
 	minutes: int = (int_sec // 60) % 60
 	hours: int = (int_sec // 3600)
-
-	print(int_sec)
 
 	return f"{pad2(hours)}:{pad2(minutes)}:{pad2(int_sec % 60)}.{str(r3(seconds - int_sec))[2:]}"
 
@@ -304,7 +302,7 @@ def create_sequence(seq_idx: int, sequence: list[dict], start_id: int, folder_ob
 
 	# Add all producers from title tracks
 	for i in range(len(sequence)):
-		out += title_to_producer(sequence[i], projdir, start_id + i, i, seq_idx)
+		out += title_to_producer(title_obj=sequence[i], projdir=projdir, folder_id=folder_obj["id"], clip_id=(start_id + i), producer_id=i, seq_id=seq_idx)
 
 	# Form the playlist
 	sequence_len: float = 0.0
@@ -358,7 +356,7 @@ def create_sequence(seq_idx: int, sequence: list[dict], start_id: int, folder_ob
 	# Create Sequence Tractor
 	# Get UUID and Hash
 	sequence_uuid = uuid.uuid4()
-	sequence_hash = hashlib.md5(f"{{{sequence_uuid}}}").hexdigest()
+	sequence_hash = hashlib.md5(f"{{{sequence_uuid}}}".encode()).hexdigest()
 
 	# Create
 	out += f"""<tractor id="{{{sequence_uuid}}}" in="00:00:00.000" out="{seconds_to_timestamp(sequence_len - (1 / FRAMERATE))}">
@@ -549,7 +547,8 @@ def titleclips_to_kdenlive(projdir):
 	# NOTE: Currently this only supports 1080p60.
 
 	main_uuid = uuid.uuid4()
-	main_uuid_hash = hashlib.md5(f"{{{main_uuid}}}").hexdigest()
+	main_uuid_hash = hashlib.md5(f"{{{main_uuid}}}".encode()).hexdigest()
+
 	base_id = 3
 
 	layout = None
@@ -589,13 +588,13 @@ def titleclips_to_kdenlive(projdir):
 
 		this_seq_folder = {
 			"id": base_id,
-			"name": f"Section {i}",
+			"name": f"Section {i + 1}",
 			"parent": 2
 		}
 
 		folders.append(this_seq_folder)
 
-		seq_out, new_base_id, seq_entry = create_sequence(i + 1, sequence, base_id + 1, this_seq_folder, main_uuid)
+		seq_out, new_base_id, seq_entry = create_sequence(seq_idx=(i + 1), sequence=sequence, start_id=(base_id + 1), folder_obj=this_seq_folder, projdir=projdir, main_uuid=main_uuid)
 		base_id = new_base_id
 
 		output += seq_out
@@ -609,16 +608,18 @@ def titleclips_to_kdenlive(projdir):
 <property name="kdenlive:audio_track">1</property>\n"""
 
 	len_sum = 0.0
+	for i in range(len(sequences[-1])):
+		len_sum += sequences[-1][i]["duration_full"]
+		if (i < len(sequences[-1]) - 1):
+			len_sum += SECTION_GAP if i == 0 else CONTENT_GAP
 
 	for i in range(len(seq_data)):
-		output += f"""	<blank length="{seconds_to_timestamp(TITLE_DURATION + SECTION_GAP) if i == 0 else seconds_to_timestamp(SECTION_GAP)}"/>
-<entry in="00:00:00.000" out="{seconds_to_timestamp(seq_data[i]["seq_len"])}" producer="{{{seq_data[i]["uuid"]}}}">
-	<property name="kdenlive:maxduration">{seconds_to_frames(seq_data[i]["seq_len"])}</property>
+		output += f"""	<blank length="{seconds_to_timestamp(len_sum + SECTION_GAP) if i == 0 else seconds_to_timestamp(SECTION_GAP)}"/>
+<entry in="00:00:00.000" out="{seconds_to_timestamp(seq_data[i]["seq_dur"])}" producer="{{{seq_data[i]["uuid"]}}}">
+	<property name="kdenlive:maxduration">{seconds_to_frames(seq_data[i]["seq_dur"])}</property>
 	<property name="kdenlive:id">{seq_data[i]["id"]}</property>
 </entry>\n"""
-		len_sum += seq_data[i]["seq_len"] + SECTION_GAP
-
-	len_sum += TITLE_DURATION
+		len_sum += seq_data[i]["seq_dur"] + SECTION_GAP
 
 	output += f"""</playlist>
 <playlist id="seq0_a2b2">
@@ -656,33 +657,48 @@ def titleclips_to_kdenlive(projdir):
 </tractor>\n"""
 
 	# Create main sequence outer video track
-	output += title_to_producer(sequences[-1], projdir, base_id, 0, 0)
 
-	output += f"""<playlist id="seq0_v2b1">
-	<entry in="00:00:00.000" out="{seconds_to_timestamp(TITLE_DURATION)}" producer="seq0_clip0">
-		<property name="kdenlive:id">{base_id}</property>
+	# Create producers
+	for i in range(len(sequences[-1])):
+		output += title_to_producer(title_obj=sequences[-1][i], projdir=projdir, folder_id=2, clip_id=(base_id + i), producer_id=i, seq_id=0)
 
-		<filter id="seq0_clip0_fadein" out="{seconds_to_timestamp(FADE_DURATION)}">
+	output += f"""<playlist id="seq0_v2b1">"""
+	for i in range(len(sequences[-1])):
+		fade_dur = FADE_DURATION if i > 0 else TITLE_FADE_DURATION
+		# Add entry
+		output += f"""	<entry in="00:00:00.000" out="{seconds_to_timestamp(sequences[-1][i]["duration_time"])}" producer="seq0_clip{i}">
+		<property name="kdenlive:id">{base_id + i}</property>
+
+		<filter id="seq0_clip{i}_fadein" out="{seconds_to_timestamp(fade_dur)}">
 			<property name="start">1</property>
 			<property name="level">1</property>
 			<property name="mlt_service">brightness</property>
 			<property name="kdenlive_id">fade_from_black</property>
-			<property name="alpha">00:00:00.000=0;{seconds_to_timestamp(FADE_DURATION)}=1</property>
+			<property name="alpha">00:00:00.000=0;{seconds_to_timestamp(fade_dur)}=1</property>
 			<property name="kdenlive:collapsed">0</property>
 		</filter>
-		<filter id="seq0_clip0_fadeout" in="{seconds_to_timestamp(TITLE_DURATION - FADE_DURATION)}" out="{seconds_to_timestamp(TITLE_DURATION)}">
+		<filter id="seq0_clip{i}_fadeout" in="{seconds_to_timestamp(sequence[i]["duration_time"] - fade_dur)}" out="{seconds_to_timestamp(sequence[i]["duration_time"])}">
 			<property name="start">1</property>
 			<property name="level">1</property>
 			<property name="mlt_service">brightness</property>
 			<property name="kdenlive_id">fade_to_black</property>
-			<property name="alpha">00:00:00.000=1;{seconds_to_timestamp(FADE_DURATION)}=0</property>
+			<property name="alpha">00:00:00.000=1;{seconds_to_timestamp(fade_dur)}=0</property>
 			<property name="kdenlive:collapsed">0</property>
 		</filter>
 	</entry>\n"""
 
+		# Add blank
+		if (i < len(sequences[-1]) - 1):
+			if (i == 0):
+				output += f"""<blank length="{seconds_to_timestamp(SECTION_GAP)}"/>\n"""
+			else:
+				output += f"""<blank length="{seconds_to_timestamp(CONTENT_GAP)}"/>\n"""
+
+	base_id += len(sequences[-1])
+
 	for i in range(len(seq_data)):
 		output += f"""	<blank length="{seconds_to_timestamp(SECTION_GAP)}"/>
-	<entry in="00:00:00.000" out="{seconds_to_timestamp(seq_data[i]["seq_len"])}" producer="{{{seq_data[i]["uuid"]}}}">
+	<entry in="00:00:00.000" out="{seconds_to_timestamp(seq_data[i]["seq_dur"])}" producer="{{{seq_data[i]["uuid"]}}}">
 		<property name="kdenlive:id">{seq_data[i]["id"]}</property>
 	</entry>\n"""
 
@@ -707,7 +723,7 @@ def titleclips_to_kdenlive(projdir):
 	<property name="kdenlive:uuid">{{{main_uuid}}}</property>
 	<property name="kdenlive:producer_type">17</property>
 	<property name="kdenlive:control_uuid">{{{main_uuid}}}</property>
-	<property name="kdenlive:id">{base_id + 1}</property>
+	<property name="kdenlive:id">{base_id}</property>
 	<property name="kdenlive:clip_type">0</property>
 	<property name="kdenlive:file_hash">{main_uuid_hash}</property>
 	<property name="kdenlive:folderid">1</property>
@@ -753,14 +769,14 @@ def titleclips_to_kdenlive(projdir):
 	</transition>\n"""
 
 	# Add default filters
-	output += f"""	<filter id="seq{seq_idx}_filter0">
+	output += f"""	<filter id="seq0_filter0">
 		<property name="window">75</property>
 		<property name="max_gain">20dB</property>
 		<property name="mlt_service">volume</property>
 		<property name="internal_added">237</property>
 		<property name="disable">1</property>
 	</filter>
-	<filter id="seq{seq_idx}_filter1">
+	<filter id="seq0_filter1">
 		<property name="channel">-1</property>
 		<property name="mlt_service">panner</property>
 		<property name="internal_added">237</property>
@@ -853,7 +869,7 @@ def titleclips_to_kdenlive(projdir):
 	<property name="kdenlive:docproperties.proxyparams"/>
 	<property name="kdenlive:docproperties.proxyresize">640</property>
 	<property name="kdenlive:docproperties.seekOffset">30000</property>
-	<property name="kdenlive:docproperties.sessionid">{{{uuid.uuid4()}}</property>
+	<property name="kdenlive:docproperties.sessionid">{{{uuid.uuid4()}}}</property>
 	<property name="kdenlive:docproperties.uuid">{{{main_uuid}}}</property>
 	<property name="kdenlive:docproperties.version">1.1</property>
 	<property name="kdenlive:expandedFolders">1;2</property>
@@ -1153,8 +1169,12 @@ def main():
 	CFG_PROJDIR = get_flag_arg("d", "directory")
 
 	if not os.path.isfile(CFG_FILE) or not os.path.isdir(CFG_PROJDIR):
-		print("Invalid file or directory. Both are required.")
-		sys.exit()
+		if os.path.isfile(CFG_FILE):
+			print("Making project directory...")
+			os.mkdir(CFG_PROJDIR)
+		else:
+			print("Invalid file or directory. Both are required.")
+			sys.exit()
 
 	# Parse script
 	cdata = parse_file(CFG_FILE)
