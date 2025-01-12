@@ -104,7 +104,7 @@ Y_CENTER = 860
 #
 
 from PIL import ImageFont
-import os, sys, json, math, uuid, hashlib
+import os, sys, json, math, time, uuid, hashlib
 
 CFG_FILE = ""
 CFG_PROJDIR = ""
@@ -202,19 +202,14 @@ def title_to_producer(title_obj: dict, projdir: str, folder_id: int, clip_id: in
 	<property name="kdenlive:monitorPosition">0</property>
 </producer>\n"""
 
-# Creates the XML for a single sequence from a sequence list.
+# Creates the XML for three blank tracks, two audio and one video.
+# This creates all necessary producers, playlists, and tractors.
 #
-# seq_idx: The index of the sequence
-# sequence: A single sequence from the list created by layout_to_sequences
-# start_id: The first free unique numeric ID to use for this sequence's producers/tractors.
-# folder_obj: A dictionary that stores the ID, Name, and Parent ID of a project bin folder.
-# projdir: The directory the outputted kdenlive file will be stored in.
-# main_uuid: The UUID of the document.
+# seq_idx: The numeric index of the sequence these blank tracks are for.
+# audio_track_count: The number of blank audio tracks to create.
 #
-# Returns a tuple with two elements.
-# The first is the XML for the given sequence.
-# The second is the next free unique numeric ID to use for future sequences.
-def create_sequence(seq_idx: int, sequence: list[dict], start_id: int, folder_obj: dict, projdir: str, main_uuid: str) -> tuple[str, int]:
+# Returns the XML to form three blank tracks.
+def prepare_sequence_blanks(seq_idx: int, audio_track_count: int = 2):
 	out = ""
 
 	# Add blank video producer
@@ -230,7 +225,7 @@ def create_sequence(seq_idx: int, sequence: list[dict], start_id: int, folder_ob
 </producer>\n"""
 
 	# Add blank audio tracks
-	for i in range(2):
+	for i in range(audio_track_count):
 		out += f"""<playlist id="seq{seq_idx}_a{i}b1">
 		<property name="kdenlive:audio_track">1</property>
 	</playlist>
@@ -273,7 +268,7 @@ def create_sequence(seq_idx: int, sequence: list[dict], start_id: int, folder_ob
 	# Add blank video track
 	out += f"""<playlist id="seq{seq_idx}_v1b1"/>
 <playlist id="seq{seq_idx}_v1b2"/>
-<tractor id="seq{seq_idx}_tractor2" in="00:00:00.000">
+<tractor id="seq{seq_idx}_tractor{audio_track_count}" in="00:00:00.000">
 	<property name="kdenlive:trackheight">67</property>
 	<property name="kdenlive:timeline_active">1</property>
 	<property name="kdenlive:thumbs_format"/>
@@ -282,6 +277,30 @@ def create_sequence(seq_idx: int, sequence: list[dict], start_id: int, folder_ob
 	<track hide="audio" producer="seq{seq_idx}_v1b1"/>
 	<track hide="audio" producer="seq{seq_idx}_v1b2"/>
 </tractor>\n"""
+
+	return out
+
+# Creates the XML for a single sequence from a sequence list.
+#
+# seq_idx: The index of the sequence
+# sequence: A single sequence from the list created by layout_to_sequences
+# start_id: The first free unique numeric ID to use for this sequence's producers/tractors.
+# folder_obj: A dictionary that stores the ID, Name, and Parent ID of a project bin folder.
+# projdir: The directory the outputted kdenlive file will be stored in.
+# main_uuid: The UUID of the document.
+#
+# Returns a tuple with three elements.
+# The first is the XML for the given sequence.
+# The second is the next free unique numeric ID to use for future sequences.
+# The third is a dictionary containing the following keys:
+#   "uuid": The UUID of the sequence
+#   "id": The numeric ID of the sequence's tractor
+#   "seq_dur": The duration of the sequence in seconds.
+def create_sequence(seq_idx: int, sequence: list[dict], start_id: int, folder_obj: dict, projdir: str, main_uuid: str) -> tuple[str, int, dict]:
+	out = ""
+
+	# Add blank video producer
+	out += prepare_sequence_blanks(seq_idx)
 
 	# Add all producers from title tracks
 	for i in range(len(sequence)):
@@ -376,10 +395,10 @@ def create_sequence(seq_idx: int, sequence: list[dict], start_id: int, folder_ob
 	<property name="kdenlive:monitorPosition">0</property>
 
 	<track producer="seq{seq_idx}_blank"/>
-	<track producer="tractor0"/>
-	<track producer="tractor1"/>
-	<track producer="tractor2"/>
-	<track producer="tractor3"/>\n"""
+	<track producer="seq{seq_idx}_tractor0"/>
+	<track producer="seq{seq_idx}_tractor1"/>
+	<track producer="seq{seq_idx}_tractor2"/>
+	<track producer="seq{seq_idx}_tractor3"/>\n"""
 
 	# Add blank space mixes
 	for i in range(4):
@@ -412,7 +431,11 @@ def create_sequence(seq_idx: int, sequence: list[dict], start_id: int, folder_ob
 </tractor>\n"""
 
 	# Return Sequence XML
-	return (out, start_id + len(sequence) + 2)
+	return (out, start_id + len(sequence) + 2, {
+		"uuid": sequence_uuid,
+		"id": start_id + len(sequence) + 1,
+		"seq_dur": sequence_len
+	})
 
 # Converts a layout object (as saved in layout.json) to a list of sequences.
 #
@@ -526,53 +549,338 @@ def titleclips_to_kdenlive(projdir):
 	# NOTE: Currently this only supports 1080p60.
 
 	main_uuid = uuid.uuid4()
+	main_uuid_hash = hashlib.md5(f"{{{main_uuid}}}").hexdigest()
 	base_id = 3
+
+	layout = None
 
 	with open(os.path.join(projdir, "titles", f"layout.json"), "r") as layout_json:
 		# Read Layout JSON
 		layout = json.loads(layout_json.read())
 
-		# Get all clips and arrange by what sequence they will be put in.
-		# The last sequence in this list shall be the main sequence.
-		sequences = layout_to_sequences(layout)
+	# Get all clips and arrange by what sequence they will be put in.
+	# The last sequence in this list shall be the main sequence.
+	sequences = layout_to_sequences(layout)
 
-		# Specify IDs for folders
-		folders = [
-			{
-				"id": 1,
-				"name": "Sequences",
-				"parent": -1
-			},
-			{
-				"id": 2,
-				"name": "Titles",
-				"parent": -1
-			}
-		]
+	seq_data = []
 
-		output = f"""<?xml version='1.0' encoding='utf-8'?>
+	# Specify IDs for folders
+	folders = [
+		{
+			"id": 1,
+			"name": "Sequences",
+			"parent": -1
+		},
+		{
+			"id": 2,
+			"name": "Titles",
+			"parent": -1
+		}
+	]
+
+	# Create Header
+	output = f"""<?xml version='1.0' encoding='utf-8'?>
 <mlt LC_NUMERIC="C" producer="main_bin" root="{os.path.abspath(projdir)}" version="7.28.0">
-	<profile colorspace="709" description="HD 1080p 60 fps" display_aspect_den="9" display_aspect_num="16" frame_rate_den="1" frame_rate_num="{FRAMERATE}" height="{RES_HEIGHT}" progressive="1" sample_aspect_den="1" sample_aspect_num="1" width="{RES_WIDTH}"/>"""
+	<profile colorspace="709" description="HD 1080p 60 fps" display_aspect_den="9" display_aspect_num="16" frame_rate_den="1" frame_rate_num="{FRAMERATE}" height="{RES_HEIGHT}" progressive="1" sample_aspect_den="1" sample_aspect_num="1" width="{RES_WIDTH}"/>\n"""
 
-		for i in range(len(sequences) - 1):
-			sequence = sequences[i]
+	# Create subsequences
+	for i in range(len(sequences) - 1):
+		sequence = sequences[i]
 
-			this_seq_folder = {
-				"id": base_id,
-				"name": f"Section {i}",
-				"parent": 2
-			}
+		this_seq_folder = {
+			"id": base_id,
+			"name": f"Section {i}",
+			"parent": 2
+		}
 
-			folders.append(this_seq_folder)
+		folders.append(this_seq_folder)
 
-			seq_out, new_base_id = create_sequence(i, sequence, base_id + 1, this_seq_folder, main_uuid)
-			base_id = new_base_id
+		seq_out, new_base_id, seq_entry = create_sequence(i + 1, sequence, base_id + 1, this_seq_folder, main_uuid)
+		base_id = new_base_id
 
-			output += seq_out
+		output += seq_out
+		seq_data.append(seq_entry)
 
+	# Create main sequence blank tracks
+	output += prepare_sequence_blanks(0, audio_track_count=1)
 
+	# Create main sequence outer audio track
+	output += f"""<playlist id="seq0_a2b1">
+<property name="kdenlive:audio_track">1</property>\n"""
 
-		print(sequences)
+	len_sum = 0.0
+
+	for i in range(len(seq_data)):
+		output += f"""	<blank length="{seconds_to_timestamp(TITLE_DURATION + SECTION_GAP) if i == 0 else seconds_to_timestamp(SECTION_GAP)}"/>
+<entry in="00:00:00.000" out="{seconds_to_timestamp(seq_data[i]["seq_len"])}" producer="{{{seq_data[i]["uuid"]}}}">
+	<property name="kdenlive:maxduration">{seconds_to_frames(seq_data[i]["seq_len"])}</property>
+	<property name="kdenlive:id">{seq_data[i]["id"]}</property>
+</entry>\n"""
+		len_sum += seq_data[i]["seq_len"] + SECTION_GAP
+
+	len_sum += TITLE_DURATION
+
+	output += f"""</playlist>
+<playlist id="seq0_a2b2">
+	<property name="kdenlive:audio_track">1</property>
+</playlist>
+<tractor id="seq0_tractor2" in="00:00:00.000" out="{seconds_to_timestamp(len_sum)}">
+	<property name="kdenlive:audio_track">1</property>
+	<property name="kdenlive:trackheight">67</property>
+	<property name="kdenlive:timeline_active">1</property>
+	<property name="kdenlive:collapsed">0</property>
+	<property name="kdenlive:thumbs_format"/>
+	<property name="kdenlive:audio_rec"/>
+	<track hide="video" producer="seq0_a2b1"/>
+	<track hide="video" producer="seq0_a2b2"/>
+	<filter id="seq0_a2_f0">
+		<property name="window">75</property>
+		<property name="max_gain">20dB</property>
+		<property name="mlt_service">volume</property>
+		<property name="internal_added">237</property>
+		<property name="disable">1</property>
+	</filter>
+	<filter id="seq0_a2_f1">
+		<property name="channel">-1</property>
+		<property name="mlt_service">panner</property>
+		<property name="internal_added">237</property>
+		<property name="start">0.5</property>
+		<property name="disable">1</property>
+	</filter>
+	<filter id="seq0_a2_f2">
+		<property name="iec_scale">0</property>
+		<property name="mlt_service">audiolevel</property>
+		<property name="dbpeak">1</property>
+		<property name="disable">0</property>
+	</filter>
+</tractor>\n"""
+
+	# Create main sequence outer video track
+	output += title_to_producer(sequences[-1], projdir, base_id, 0, 0)
+
+	output += f"""<playlist id="seq0_v2b1">
+	<entry in="00:00:00.000" out="{seconds_to_timestamp(TITLE_DURATION)}" producer="seq0_clip0">
+		<property name="kdenlive:id">{base_id}</property>
+
+		<filter id="seq0_clip0_fadein" out="{seconds_to_timestamp(FADE_DURATION)}">
+			<property name="start">1</property>
+			<property name="level">1</property>
+			<property name="mlt_service">brightness</property>
+			<property name="kdenlive_id">fade_from_black</property>
+			<property name="alpha">00:00:00.000=0;{seconds_to_timestamp(FADE_DURATION)}=1</property>
+			<property name="kdenlive:collapsed">0</property>
+		</filter>
+		<filter id="seq0_clip0_fadeout" in="{seconds_to_timestamp(TITLE_DURATION - FADE_DURATION)}" out="{seconds_to_timestamp(TITLE_DURATION)}">
+			<property name="start">1</property>
+			<property name="level">1</property>
+			<property name="mlt_service">brightness</property>
+			<property name="kdenlive_id">fade_to_black</property>
+			<property name="alpha">00:00:00.000=1;{seconds_to_timestamp(FADE_DURATION)}=0</property>
+			<property name="kdenlive:collapsed">0</property>
+		</filter>
+	</entry>\n"""
+
+	for i in range(len(seq_data)):
+		output += f"""	<blank length="{seconds_to_timestamp(SECTION_GAP)}"/>
+	<entry in="00:00:00.000" out="{seconds_to_timestamp(seq_data[i]["seq_len"])}" producer="{{{seq_data[i]["uuid"]}}}">
+		<property name="kdenlive:id">{seq_data[i]["id"]}</property>
+	</entry>\n"""
+
+	output += f"""</playlist>
+<playlist id="seq0_v2b2"/>
+<tractor id="seq0_tractor3" in="00:00:00.000" out="{seconds_to_timestamp(len_sum)}">
+	<property name="kdenlive:trackheight">67</property>
+	<property name="kdenlive:timeline_active">1</property>
+	<property name="kdenlive:collapsed">0</property>
+	<property name="kdenlive:thumbs_format"/>
+	<property name="kdenlive:audio_rec"/>
+	<track hide="audio" producer="seq0_v2b1"/>
+	<track hide="audio" producer="seq0_v2b2"/>
+</tractor>\n"""
+
+	# Define Main Sequence
+	output += f"""<tractor id="{{{main_uuid}}}" in="00:00:00.000" out="{seconds_to_timestamp(len_sum)}">
+	<property name="kdenlive:duration">{seconds_to_timestamp(len_sum)}</property>
+	<property name="kdenlive:maxduration">{seconds_to_frames(len_sum)}</property>
+	<property name="kdenlive:clipname">Main Sequence</property>
+	<property name="kdenlive:description"/>
+	<property name="kdenlive:uuid">{{{main_uuid}}}</property>
+	<property name="kdenlive:producer_type">17</property>
+	<property name="kdenlive:control_uuid">{{{main_uuid}}}</property>
+	<property name="kdenlive:id">{base_id + 1}</property>
+	<property name="kdenlive:clip_type">0</property>
+	<property name="kdenlive:file_hash">{main_uuid_hash}</property>
+	<property name="kdenlive:folderid">1</property>
+	<property name="kdenlive:sequenceproperties.activeTrack">3</property>
+	<property name="kdenlive:sequenceproperties.audioTarget">1</property>
+	<property name="kdenlive:sequenceproperties.disablepreview">0</property>
+	<property name="kdenlive:sequenceproperties.documentuuid">{{{main_uuid}}}</property>
+	<property name="kdenlive:sequenceproperties.hasAudio">1</property>
+	<property name="kdenlive:sequenceproperties.hasVideo">1</property>
+	<property name="kdenlive:sequenceproperties.position">0</property>
+	<property name="kdenlive:sequenceproperties.scrollPos">0</property>
+	<property name="kdenlive:sequenceproperties.tracks">4</property>
+	<property name="kdenlive:sequenceproperties.tracksCount">4</property>
+	<property name="kdenlive:sequenceproperties.verticalzoom">1</property>
+	<property name="kdenlive:sequenceproperties.zonein">0</property>
+	<property name="kdenlive:sequenceproperties.zoneout">{seconds_to_frames(len_sum)}</property>
+	<property name="kdenlive:sequenceproperties.zoom">8</property>
+	<property name="kdenlive:sequenceproperties.groups">[
+	]
+	</property>
+	<property name="kdenlive:sequenceproperties.guides">[
+	]
+	</property>
+	<property name="kdenlive:monitorPosition">0</property>
+
+	<track producer="seq0_blank"/>
+	<track producer="seq0_tractor0"/>
+	<track producer="seq0_tractor2"/>
+	<track producer="seq0_tractor1"/>
+	<track producer="seq0_tractor3"/>\n"""
+
+	# Add blank space mixes
+	for i in range(4):
+		output += f"""	<transition id="transition0">
+		<property name="a_track">0</property>
+		<property name="b_track">{i + 1}</property>
+		<property name="mlt_service">mix</property>
+		<property name="kdenlive_id">mix</property>
+		<property name="internal_added">237</property>
+		<property name="always_active">1</property>
+		<property name="accepts_blanks">1</property>
+		<property name="sum">1</property>
+	</transition>\n"""
+
+	# Add default filters
+	output += f"""	<filter id="seq{seq_idx}_filter0">
+		<property name="window">75</property>
+		<property name="max_gain">20dB</property>
+		<property name="mlt_service">volume</property>
+		<property name="internal_added">237</property>
+		<property name="disable">1</property>
+	</filter>
+	<filter id="seq{seq_idx}_filter1">
+		<property name="channel">-1</property>
+		<property name="mlt_service">panner</property>
+		<property name="internal_added">237</property>
+		<property name="start">0.5</property>
+		<property name="disable">1</property>
+	</filter>
+</tractor>\n"""
+
+	# Add main_bin
+	all_seq_uuids = ""
+	for entry in seq_data:
+		all_seq_uuids += f'{{{entry["uuid"]}}}' + ";"
+	all_seq_uuids = all_seq_uuids[:-1]
+
+	output += f"""<playlist id="main_bin">\n"""
+
+	for entry in folders:
+		output += f"""	<property name="kdenlive:folder.{entry["parent"]}.{entry["id"]}">{entry["name"]}</property>"""
+
+	output += f"""
+	<property name="kdenlive:sequenceFolder">1</property>
+	<property name="kdenlive:docproperties.activetimeline">{{{main_uuid}}}</property>
+	<property name="kdenlive:docproperties.audioChannels">2</property>
+	<property name="kdenlive:docproperties.binsort">100</property>
+	<property name="kdenlive:docproperties.browserurl">./</property>
+	<property name="kdenlive:docproperties.documentid">{round(time.time())}</property>
+	<property name="kdenlive:docproperties.enableTimelineZone">0</property>
+	<property name="kdenlive:docproperties.enableexternalproxy">0</property>
+	<property name="kdenlive:docproperties.enableproxy">0</property>
+	<property name="kdenlive:docproperties.externalproxyparams">./;;.LRV;./;;.MP4</property>
+	<property name="kdenlive:docproperties.generateimageproxy">0</property>
+	<property name="kdenlive:docproperties.generateproxy">0</property>
+	<property name="kdenlive:docproperties.guidesCategories">[
+		{{
+			"color": "#9b59b6",
+			"comment": "Category 1",
+			"index": 0
+		}},
+		{{
+			"color": "#3daee9",
+			"comment": "Category 2",
+			"index": 1
+		}},
+		{{
+			"color": "#1abc9c",
+			"comment": "Category 3",
+			"index": 2
+		}},
+		{{
+			"color": "#1cdc9a",
+			"comment": "Category 4",
+			"index": 3
+		}},
+		{{
+			"color": "#c9ce3b",
+			"comment": "Category 5",
+			"index": 4
+		}},
+		{{
+			"color": "#fdbc4b",
+			"comment": "Category 6",
+			"index": 5
+		}},
+		{{
+			"color": "#f39c1f",
+			"comment": "Category 7",
+			"index": 6
+		}},
+		{{
+			"color": "#f47750",
+			"comment": "Category 8",
+			"index": 7
+		}},
+		{{
+			"color": "#da4453",
+			"comment": "Category 9",
+			"index": 8
+		}}
+	]
+	</property>
+	<property name="kdenlive:docproperties.kdenliveversion">24.12.0</property>
+	<property name="kdenlive:docproperties.opensequences">{all_seq_uuids}</property>
+	<property name="kdenlive:docproperties.previewextension"/>
+	<property name="kdenlive:docproperties.previewparameters"/>
+	<property name="kdenlive:docproperties.profile">atsc_1080p_60</property>
+	<property name="kdenlive:docproperties.proxyextension"/>
+	<property name="kdenlive:docproperties.proxyimageminsize">2000</property>
+	<property name="kdenlive:docproperties.proxyimagesize">800</property>
+	<property name="kdenlive:docproperties.proxyminsize">1000</property>
+	<property name="kdenlive:docproperties.proxyparams"/>
+	<property name="kdenlive:docproperties.proxyresize">640</property>
+	<property name="kdenlive:docproperties.seekOffset">30000</property>
+	<property name="kdenlive:docproperties.sessionid">{{{uuid.uuid4()}}</property>
+	<property name="kdenlive:docproperties.uuid">{{{main_uuid}}}</property>
+	<property name="kdenlive:docproperties.version">1.1</property>
+	<property name="kdenlive:expandedFolders">1;2</property>
+	<property name="kdenlive:binZoom">4</property>
+	<property name="kdenlive:extraBins">project_bin:-1:0</property>
+	<property name="kdenlive:documentnotes"/>
+	<property name="kdenlive:documentnotesversion">2</property>
+	<property name="xml_retain">1</property>\n"""
+
+	for i in range(len(seq_data)):
+		for j in range(len(sequences[i])):
+			output += f"""	<entry in="00:00:00.000" out="{seconds_to_timestamp(sequences[i][j]["duration_time"])}" producer="seq{i}_clip{j}"/>\n"""
+
+	output += f"""	<entry in="00:00:00.000" out="{seconds_to_timestamp(TITLE_DURATION)}" producer="seq0_clip0"/>\n"""
+
+	for i in range(len(seq_data)):
+		output += f"""	<entry in="00:00:00.000" out="{seconds_to_timestamp(seq_data[i]["seq_dur"])}" producer="{{{seq_data[i]["uuid"]}}}"/>"""
+	output += f"""<entry in="00:00:00.000" out="00:01:06.800" producer="{{{main_uuid}}}"/>\n"""
+
+	output += f"""</playlist>
+<tractor id="main_tractor" in="00:00:00.000" out="{seconds_to_timestamp(len_sum)}">
+	<property name="kdenlive:projectTractor">1</property>
+	<track in="00:00:00.000" out="{seconds_to_timestamp(len_sum)}" producer="{{{main_uuid}}}"/>
+</tractor></mlt>"""
+
+	with open(os.path.join(projdir, "project.kdenlive"), "w") as project_file:
+		project_file.write(output)
 
 
 
