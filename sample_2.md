@@ -6,18 +6,18 @@ supertitle: Part of ktg
 
 This is a standard text segment. Before the next segment, the pause command will run.
 
-{{pause}}(0.5)
+-=- pause (0.5)
 
 The pause command sets the gap between text clips to be different than the default. 
 It takes one parameter, which specifies the length of the pause in seconds.
 
 The next command is called ignore, and will ignore the next text paragraph.
 
-{{ignore}}()
+-=- ignore ()
 
 This text will not display in the video.
 
-[[Note that you can also make text not display by surrounding it in double square brackets.]]
+/=/ Note that you can also make text not display by adding `/=/` before it.
 
 The previous text segment did not display. This is intended.
 

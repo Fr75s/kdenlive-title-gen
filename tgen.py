@@ -99,6 +99,49 @@ MAX_CONTENT_WIDTH = 1440
 Y_CENTER = 860
 
 
+
+#
+# Internal Vars
+#
+
+errors = {
+	"general": "General Error",
+	"dp": "Markdown Parsing Error",
+	"cp": "Command Parsing Error",
+	"tc": "Title Clip Conversion Error",
+	"pf": "Project Creation Error"
+}
+
+commands = {
+	"pause": [
+		["float"]
+	],
+	"ignore": [
+		[]
+	]
+}
+
+modifiers = {
+	"color": [
+		["int;0-255","int;0-255","int;0-255"],
+		["int;0-255","int;0-255","int;0-255","int;0-255"]
+	],
+	"font": [
+		["string"]
+	],
+	"font_size": [
+		["int;1-2147483647"]
+	],
+	"outline_color": [
+		["int;0-255","int;0-255","int;0-255"],
+		["int;0-255","int;0-255","int;0-255","int;0-255"]
+	],
+	"y": [
+		["int"]
+	]
+}
+
+
 #
 # IMPORTS
 #
@@ -114,6 +157,10 @@ CFG_PROJDIR = ""
 #
 
 # general helpers
+
+# Prints the given error with the given error key.
+def print_error(error_key: str, msg: str):
+	print(f"{error_key}: {msg}")
 
 # Rounds the given value to 3 decimal places.
 def r3(value: float) -> float:
@@ -536,6 +583,142 @@ def break_text_by_font_width(text: str, font: str, font_size: int, max_width: in
 	return broken_text
 
 
+# Checks a list of parameters for type validity based on the given keyword and corresponding
+# command definition.
+#
+#
+#
+# Returns whether or not the given parameter list is a valid set for the given command.
+def check_paramlist_validity(keyword: str, params: list[str]) -> bool:
+	for paramlist in commands[keyword]:
+		# Check if lengths are equal
+		if (len(params) != len(paramlist)):
+			continue
+
+		# Go through each type in param list
+		for i in range(len(paramlist)):
+			combined_type = paramlist[i]
+			# Split by restriction
+			split_type = combined_type.split(";")
+
+			# Get restriction on range of values if it exists
+			split_range = []
+			if (len(split_type) != 0):
+				str_split_range = split_type[1].split("-")
+				# Add lower bound
+				split_range.append(int(str_split_range[0]))
+				# Add upper bound
+				if (len(str_split_range) > 0 and str_split_range[1] != ""):
+					split_range.append(int(str_split_range[1]))
+
+			# Check General Type
+			match split_type[0]:
+				case "int":
+					# Check if correct type
+					try:
+						int(params[i])
+					except ValueError:
+						continue
+					# Check if out of bounds
+					if (len(split_range) > 0):
+						if (int(params[i]) < split_range[0]):
+							continue
+						if (len(split_range) > 1):
+							if (int(params[i]) > split_range[1]):
+								continue
+				case "float":
+					# Check if correct type
+					try:
+						float(params[i])
+					except ValueError:
+						continue
+					# Check if out of bounds
+					if (len(split_range) > 0):
+						if (int(params[i]) < split_range[0]):
+							continue
+						if (len(split_range) > 1):
+							if (int(params[i]) > split_range[1]):
+								continue
+
+		# Types valid and length valid, param list is therefore valid
+		return True
+
+	# No valid form found.
+	return False
+
+
+# Parses a single command line.
+#
+# line: The entire command line to parse.
+#
+# Returns a tuple containing two elements. The first is the keyword of the command, the second is
+# a list of its parameters as a string.
+def parse_command(line: str) -> tuple[str, list[str]]:
+	# Check if command
+	if (line[0:3] != "-=-")
+		return ("ERROR_NOT_COMMAND", [])
+
+	# Get parameter index
+	line = line.strip()
+	param_i = line.find("(")
+	param_end_i = line.find(")")
+
+	# Check if no params
+	if (param_i == -1):
+		param_i = len(line) - 2
+	elif (param_end_i == -1):
+		return ("ERROR_UNCLOSED_PARAMS", [])
+
+	# Get command keyword
+	keyword = line[3:param_i]
+
+	if not(keyword in commands):
+		return ("ERROR_INVALID_COMMAND", [])
+
+	# Get command parameters (if present)
+	params = []
+	if (param_i != -1):
+		params = line[param_i:param_end_i].split(";")
+		# Check validity of params
+		params_valid = check_paramlist_validity(keyword, params)
+		if not(params_valid):
+			return (f"ERROR_PARAMVALID", [])
+
+	return (keyword, params)
+
+# Parses the given block for commands, ensuring only commands are present and that
+# all commands are valid.
+# Assumes that this block has already been determined to be a command block (i.e. contains
+# at least one command line).
+#
+# lines: The list of lines that form this command block.
+# line_num: The number of the first line of the command block in the markdown file.
+#
+# Returns the list of commands as keyword/parameter list pairs, or an empty list if an
+# error occurred while parsing.
+def parse_commands(lines: list[str], line_num: int) -> list[tuple[str, list[str]]]:
+	cmd_list = []
+	for i in range(len(lines)):
+		keyerr, paramlist = parse_command(lines[i])
+		# Check if error
+		if not(keyerr in commands):
+			match keyerr:
+				case "ERROR_NOT_COMMAND":
+					print_error("cp", f"Line in Command Block is Not a Command (Line {i + line_num}).")
+				case "ERROR_UNCLOSED_PARAMS":
+					print_error("cp", f"Unclosed Parameters in Command (Line {i + line_num})")
+				case "ERROR_INVALID_COMMAND":
+					print_error("cp", f"Unspecified Command (Line {i + line_num})")
+				case "ERROR_PARAMVALID":
+					print_error("cp", f"Invalid Parameters for Command (Line {i + line_num})")
+			return []
+
+		# Add to list
+		cmd_list.append((keyerr, paramlist))
+
+	return cmd_list
+
+
 #
 # WORKING FUNCTIONS
 #
@@ -927,20 +1110,25 @@ def clip_data_to_titleclips(cd, projdir):
 				subtitle_y_pos = title_y_pos + TITLE_FONT_SIZE + TITLE_GAP
 				supertitle_y_pos = title_y_pos - TITLE_GAP - SUPERTITLE_FONT_SIZE
 
-				data = f"""<kdenlivetitle LC_NUMERIC="C" duration_frames="{duration_frames}" height="{RES_HEIGHT}" out="{duration_frames}" width="{RES_WIDTH}">
- <item type="QGraphicsTextItem" z-index="2">
+				data = f"""<kdenlivetitle LC_NUMERIC="C" duration_frames="{duration_frames}" height="{RES_HEIGHT}" out="{duration_frames}" width="{RES_WIDTH}"\n"""
+
+				if ("subtitle" in clip):
+					data += f""" <item type="QGraphicsTextItem" z-index="2">
   <position x="0" y="{subtitle_y_pos}">
    <transform>1,0,0,0,1,0,0,0,1</transform>
   </position>
   <content alignment="4" box-height="{RES_HEIGHT}" box-width="{RES_WIDTH}" font="{FONT_NAME}" font-color="{color_code(SUBTITLE_FONT_COLOR)}" font-italic="0" font-outline="{FONT_OUTLINE_THICK}" font-outline-color="{color_code(FONT_OUTLINE_COLOR)}" font-pixel-size="{SUBTITLE_FONT_SIZE}" font-underline="0" font-weight="{SUBSUPER_FONT_WEIGHT}" letter-spacing="0" line-spacing="0" shadow="0;#64000000;3;3;3" tab-width="80" typewriter="0;2;1;0;0">{clip["subtitle"]}</content>
- </item>
- <item type="QGraphicsTextItem" z-index="1">
+ </item>\n"""
+
+				if ("supertitle" in clip):
+					data += f""" <item type="QGraphicsTextItem" z-index="1">
   <position x="0" y="{supertitle_y_pos}">
    <transform>1,0,0,0,1,0,0,0,1</transform>
   </position>
   <content alignment="4" box-height="{RES_HEIGHT}" box-width="{RES_WIDTH}" font="{FONT_NAME}" font-color="{color_code(SUPERTITLE_FONT_COLOR)}" font-italic="0" font-outline="{FONT_OUTLINE_THICK}" font-outline-color="{color_code(FONT_OUTLINE_COLOR)}" font-pixel-size="{SUPERTITLE_FONT_SIZE}" font-underline="0" font-weight="{SUBSUPER_FONT_WEIGHT}" letter-spacing="0" line-spacing="0" shadow="0;#64000000;3;3;3" tab-width="80" typewriter="0;2;1;0;0">{clip["supertitle"]}</content>
- </item>
- <item type="QGraphicsTextItem" z-index="0">
+ </item>\n"""
+
+				data += f""" <item type="QGraphicsTextItem" z-index="0">
   <position x="0" y="{title_y_pos}">
    <transform>1,0,0,0,1,0,0,0,1</transform>
   </position>
@@ -1049,6 +1237,7 @@ def parse_file(f):
 		# Frontmatter check 1
 		line = inp.readline()
 		if (line != "---\n"):
+			print_error("dp", "Markdown does not start with frontmatter")
 			return []
 
 		# Parse frontmatter
@@ -1071,18 +1260,48 @@ def parse_file(f):
 
 		# Frontmatter check 2
 		if (line != "---\n" or not "title" in clip_data[0]):
+			if (line != "---\n"):
+				print_error("dp", "Frontmatter incomplete.")
+			else:
+				print_error("dp", "No 'title' field in frontmatter.")
 			return []
 
 		# Content check
 		line = inp.readline()
 		line = inp.readline()
 		if (line == ""):
+			print_error("dp", "At least one line of text/section header/command must be present in the document.")
 			return []
 
 		# Parse content
 		while (line != ""):
-			lt = line[:-1]
+			# Get lines in block
+			lines = []
 
+			while (line != "\n" and line != ""):
+				# Eliminate Comments
+				if (line[:3] != "/=/"):
+					lines.append(line[:-1])
+				line = inp.readline()
+
+			if (len(lines) == 0):
+				continue
+
+			# Check if this is a command block
+			for line in lines:
+				if (line[0:3] == "-=-"):
+					# Command block
+					command_list = parse_commands(lines, 0)
+					if (command_list == []):
+						print_error("dp", "An error occurred while parsing a command block.")
+						return []
+					else:
+						# Process Commands
+						# ...
+
+						continue
+
+			# Not a command block.
 			this_clip = {}
 
 			if (lt[0:2] == "##"):
@@ -1108,7 +1327,7 @@ def parse_file(f):
 
 			clip_data.append(this_clip)
 
-			line = inp.readline()
+
 			line = inp.readline()
 
 	return clip_data
