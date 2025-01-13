@@ -104,17 +104,20 @@ Y_CENTER = 860
 # Internal Vars
 #
 
+DEBUG = True
+
 errors = {
 	"general": "General Error",
 	"dp": "Markdown Parsing Error",
 	"cp": "Command Parsing Error",
+	"mp": "Modifier Parsing Error",
 	"tc": "Title Clip Conversion Error",
 	"pf": "Project Creation Error"
 }
 
 commands = {
 	"pause": [
-		["float"]
+		["float;0-"]
 	],
 	"ignore": [
 		[]
@@ -158,9 +161,13 @@ CFG_PROJDIR = ""
 
 # general helpers
 
+def pdb(msg: str):
+	if DEBUG:
+		print(f"* DEBUG: {msg}")
+
 # Prints the given error with the given error key.
 def print_error(error_key: str, msg: str):
-	print(f"{error_key}: {msg}")
+	print(f"{errors[error_key]}: {msg}")
 
 # Rounds the given value to 3 decimal places.
 def r3(value: float) -> float:
@@ -238,9 +245,9 @@ def title_to_producer(title_obj: dict, projdir: str, folder_id: int, clip_id: in
 	<property name="xml">was here</property>
 	<property name="kdenlive:folderid">{folder_id}</property>
 	<property name="kdenlive:id">{clip_id}</property>
-	<property name="kdenlive:control_uuid">{{{new_uuid}}}</property> ***
+	<property name="kdenlive:control_uuid">{{{new_uuid}}}</property>
 	<property name="kdenlive:clip_type">2</property>
-	<property name="kdenlive:file_hash">{file_hash}</property> ***
+	<property name="kdenlive:file_hash">{file_hash}</property>
 	<property name="force_reload">0</property>
 	<property name="meta.media.width">{RES_WIDTH}</property>
 	<property name="meta.media.height">{RES_HEIGHT}</property>
@@ -589,13 +596,17 @@ def break_text_by_font_width(text: str, font: str, font_size: int, max_width: in
 #
 #
 # Returns whether or not the given parameter list is a valid set for the given command.
-def check_paramlist_validity(keyword: str, params: list[str]) -> bool:
-	for paramlist in commands[keyword]:
+def check_paramlist_validity(keyword: str, params: list[str], modifier: bool = False) -> bool:
+	cmd_def_list = modifiers[keyword] if modifier else commands[keyword]
+	pdb(f"Checking if {params} valid")
+	for paramlist in cmd_def_list:
 		# Check if lengths are equal
+		pdb(f"Checking paramlist {paramlist} for match")
 		if (len(params) != len(paramlist)):
 			continue
 
 		# Go through each type in param list
+		bad_params = False
 		for i in range(len(paramlist)):
 			combined_type = paramlist[i]
 			# Split by restriction
@@ -611,6 +622,8 @@ def check_paramlist_validity(keyword: str, params: list[str]) -> bool:
 				if (len(str_split_range) > 0 and str_split_range[1] != ""):
 					split_range.append(int(str_split_range[1]))
 
+			pdb(f"Param {i} ({params[i]}) should be of type {split_type}, with range {split_range}")
+
 			# Check General Type
 			match split_type[0]:
 				case "int":
@@ -618,27 +631,36 @@ def check_paramlist_validity(keyword: str, params: list[str]) -> bool:
 					try:
 						int(params[i])
 					except ValueError:
-						continue
+						bad_params = True
+						break
 					# Check if out of bounds
 					if (len(split_range) > 0):
 						if (int(params[i]) < split_range[0]):
-							continue
+							bad_params = True
+							break
 						if (len(split_range) > 1):
 							if (int(params[i]) > split_range[1]):
-								continue
+								bad_params = True
+								break
 				case "float":
 					# Check if correct type
 					try:
 						float(params[i])
 					except ValueError:
-						continue
+						bad_params = True
+						break
 					# Check if out of bounds
 					if (len(split_range) > 0):
-						if (int(params[i]) < split_range[0]):
-							continue
+						if (float(params[i]) < split_range[0]):
+							bad_params = True
+							break
 						if (len(split_range) > 1):
-							if (int(params[i]) > split_range[1]):
-								continue
+							if (float(params[i]) > split_range[1]):
+								bad_params = True
+								break
+
+		if (bad_params):
+			continue
 
 		# Types valid and length valid, param list is therefore valid
 		return True
@@ -655,11 +677,11 @@ def check_paramlist_validity(keyword: str, params: list[str]) -> bool:
 # a list of its parameters as a string.
 def parse_command(line: str) -> tuple[str, list[str]]:
 	# Check if command
-	if (line[0:3] != "-=-")
+	if (line[0:3] != "-=-"):
 		return ("ERROR_NOT_COMMAND", [])
 
 	# Get parameter index
-	line = line.strip()
+	line = line.replace(" ", "")
 	param_i = line.find("(")
 	param_end_i = line.find(")")
 
@@ -672,17 +694,22 @@ def parse_command(line: str) -> tuple[str, list[str]]:
 	# Get command keyword
 	keyword = line[3:param_i]
 
+	pdb(f"Parsing Command {keyword}")
+
 	if not(keyword in commands):
 		return ("ERROR_INVALID_COMMAND", [])
 
 	# Get command parameters (if present)
 	params = []
 	if (param_i != -1):
-		params = line[param_i:param_end_i].split(";")
-		# Check validity of params
-		params_valid = check_paramlist_validity(keyword, params)
-		if not(params_valid):
-			return (f"ERROR_PARAMVALID", [])
+		params = line[param_i + 1:param_end_i].split(";")
+		if (len(params) == 1 and len(params[0]) == 0):
+			params = []
+
+	# Check validity of params
+	params_valid = check_paramlist_validity(keyword, params)
+	if not(params_valid):
+		return (f"ERROR_PARAMVALID", [])
 
 	return (keyword, params)
 
@@ -706,17 +733,59 @@ def parse_commands(lines: list[str], line_num: int) -> list[tuple[str, list[str]
 				case "ERROR_NOT_COMMAND":
 					print_error("cp", f"Line in Command Block is Not a Command (Line {i + line_num}).")
 				case "ERROR_UNCLOSED_PARAMS":
-					print_error("cp", f"Unclosed Parameters in Command (Line {i + line_num})")
+					print_error("cp", f"Unclosed Parameters (Line {i + line_num})")
 				case "ERROR_INVALID_COMMAND":
 					print_error("cp", f"Unspecified Command (Line {i + line_num})")
 				case "ERROR_PARAMVALID":
-					print_error("cp", f"Invalid Parameters for Command (Line {i + line_num})")
+					print_error("cp", f"Invalid Parameters (Line {i + line_num})")
 			return []
 
 		# Add to list
 		cmd_list.append((keyerr, paramlist))
 
 	return cmd_list
+
+
+def parse_modifiers(lines: list[str]) -> dict:
+	current_modifiers = {}
+
+	for i in range(len(lines)):
+		li = lines[i].replace(" ", "")
+
+		# Check if line specifies a modifier
+		if li[0:1] == "{{":
+			last_i = li.find("}}")
+			if (last_i == -1):
+				print_error("mp", "Unclosed Modifier Keyword")
+				return {"error": True}
+			else:
+				# Get modifier keyword
+				keyword = li[2:last_i]
+
+				# Get params
+				param_i = line.find("(")
+				param_end_i = line.find(")")
+
+				params = []
+				if (param_i != -1 and param_end_i != -1):
+					params = li[param_i + 1:param_end_i].split(";")
+					if (len(params) == 1 and len(params[0]) == 0):
+						params = []
+				if (param_i != -1 and param_end_i == -1 or param_i == -1 and param_end_i != -1):
+					print_error("mp", "Unclosed Parameter Block.")
+					return {"error": True}
+
+				params_valid = check_paramlist_validity(keyword, params, modifier=True)
+				if not(params_valid):
+					print_error("mp", "Invalid Parameters")
+					return {"error": True}
+
+				# Create Modifier
+				current_modifiers[keyword] = params
+
+	return current_modifiers
+
+
 
 
 #
@@ -860,7 +929,7 @@ def titleclips_to_kdenlive(projdir):
 			<property name="alpha">00:00:00.000=0;{seconds_to_timestamp(fade_dur)}=1</property>
 			<property name="kdenlive:collapsed">0</property>
 		</filter>
-		<filter id="seq0_clip{i}_fadeout" in="{seconds_to_timestamp(sequence[i]["duration_time"] - fade_dur)}" out="{seconds_to_timestamp(sequence[i]["duration_time"])}">
+		<filter id="seq0_clip{i}_fadeout" in="{seconds_to_timestamp(sequences[-1][i]["duration_time"] - fade_dur)}" out="{seconds_to_timestamp(sequences[-1][i]["duration_time"])}">
 			<property name="start">1</property>
 			<property name="level">1</property>
 			<property name="mlt_service">brightness</property>
@@ -1242,6 +1311,7 @@ def parse_file(f):
 
 		# Parse frontmatter
 		line = inp.readline()
+		line_no = 1
 		while (line != "---\n" and line != ""):
 			lt = line[:-1]
 			# Get title field
@@ -1257,6 +1327,7 @@ def parse_file(f):
 				clip_data[0]["supertitle"] = lt[12:]
 
 			line = inp.readline()
+			line_no += 1
 
 		# Frontmatter check 2
 		if (line != "---\n" or not "title" in clip_data[0]):
@@ -1269,9 +1340,16 @@ def parse_file(f):
 		# Content check
 		line = inp.readline()
 		line = inp.readline()
+		line_no += 2
 		if (line == ""):
 			print_error("dp", "At least one line of text/section header/command must be present in the document.")
 			return []
+
+		# Command flags, used for next block
+		cmd_flags = {
+			"pause": -1,
+			"ignore": False
+		}
 
 		# Parse content
 		while (line != ""):
@@ -1283,38 +1361,71 @@ def parse_file(f):
 				if (line[:3] != "/=/"):
 					lines.append(line[:-1])
 				line = inp.readline()
+				line_no += 1
+
+			pdb(f"Block Read: {lines}")
 
 			if (len(lines) == 0):
+				line = inp.readline()
+				line_no += 1
 				continue
 
 			# Check if this is a command block
+			command_block = False
 			for line in lines:
 				if (line[0:3] == "-=-"):
 					# Command block
-					command_list = parse_commands(lines, 0)
+					command_block = True
+					command_list = parse_commands(lines, line_no)
+
 					if (command_list == []):
 						print_error("dp", "An error occurred while parsing a command block.")
 						return []
 					else:
 						# Process Commands
-						# ...
-
-						continue
+						for command_pair in command_list:
+							match command_pair[0]:
+								case "pause":
+									cmd_flags["pause"] = command_pair[1][0]
+								case "ignore":
+									cmd_flags["ignore"] = True
+			if (command_block):
+				line = inp.readline()
+				line_no += 1
+				continue
 
 			# Not a command block.
+
+			# Check if ignore
+			if (cmd_flags["ignore"]):
+				cmd_flags["ignore"] = False
+				line = inp.readline()
+				line_no += 1
+				continue
+
 			this_clip = {}
 
-			if (lt[0:2] == "##"):
+			# Parse for modifiers
+			this_clip["modifiers"] = parse_modifiers(lines)
+
+			# Coalesce lines into content
+			block_text = ""
+			for line in lines:
+				if (line[0:2] != "{{"):
+					block_text += line + " "
+			block_text = block_text[:-1]
+
+			if (block_text[0:2] == "##"):
 				# section clip
 				this_clip["type"] = "section"
 				this_clip["duration"] = SECTION_DURATION + FADE_DURATION * 2
 
-				this_clip["content"] = lt[3:]
+				this_clip["content"] = block_text[3:]
 			else:
 				# content clip
 				this_clip["type"] = "content"
 
-				wc = len(lt.split(" "))
+				wc = len(block_text.split(" "))
 
 				# Get duration_frames as a function of reading speed relative to # words
 				# multiplied by a factor which shortens the clip length as longer
@@ -1323,12 +1434,19 @@ def parse_file(f):
 				# Add fade time
 				this_clip["duration"] += FADE_DURATION * 2
 
-				this_clip["content"] = lt
+				this_clip["content"] = block_text
+
+			# Pause command
+			if (cmd_flags["pause"] != -1):
+				this_clip["before_pause"] = float(cmd_flags["pause"])
+				cmd_flags["pause"] = -1
 
 			clip_data.append(this_clip)
 
-
 			line = inp.readline()
+			line_no += 1
+
+	pdb(f"CLIPS: {clip_data}")
 
 	return clip_data
 
@@ -1370,14 +1488,11 @@ def parse_flags():
 		print("kdenlive title generator")
 		print()
 		print("Usage: python3 tgen.py [options] -f [file] -d [directory]")
-		print("Options:")
+		print("Flags:")
 		print("  -f\t")
 		print("  --file\tSpecify a markdown script to convert.")
 		print("  -d\t")
 		print("  --directory\tSpecify a directory to save all title clips.")
-		print("  -n\t")
-		print("  --nosave\tDo not save title clips as separate files. This will bundle all")
-		print("\t\tClips in the project itself. Not recommended unless the script is small.")
 		sys.exit()
 
 
@@ -1396,13 +1511,16 @@ def main():
 			sys.exit()
 
 	# Parse script
+	print("Parsing Script...")
 	cdata = parse_file(CFG_FILE)
 	if (cdata == []):
 		print("Invalid Markdown Script!")
 		sys.exit()
 
+	print("Creating Title Clips...")
 	clip_data_to_titleclips(cdata, CFG_PROJDIR)
 
+	print("Creating Project...")
 	titleclips_to_kdenlive(CFG_PROJDIR)
 
 main()

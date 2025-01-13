@@ -832,7 +832,91 @@ With that, we have formed our video, and can close the MLT tag to form our docum
 
 
 
+# kdenlivetitle walkthrough
+
+A .kdenlive title is much shorter than a full project document. The XML for a .kdenlivetitle may be saved elsewhere or may be bundled within the .kdenlive project file itself.
+
+```xml
+<kdenlivetitle LC_NUMERIC="C" duration_frames="315" height="1080" out="315" width="1920">
+	<item type="QGraphicsTextItem" z-index="0">
+		<position x="240" y="836">
+			<transform>1,0,0,0,1,0,0,0,1</transform>
+		</position>
+		<content alignment="4" box-height="1080" box-width="1440" font="Inter" font-color="255,255,255,255" font-italic="0" font-outline="6" font-outline-color="0,0,0,255" font-pixel-size="48" font-underline="0" font-weight="600" letter-spacing="0" line-spacing="0" shadow="0;#ff000000;8;0;0" tab-width="80" typewriter="0;2;1;0;0">This is the first section of the video, not much to see here.</content>
+	</item>
+	<startviewport rect="0,0,1920,1080"/>
+	<endviewport rect="0,0,1920,1080"/>
+	<background color="0,0,0,0"/>
+</kdenlivetitle>
+```
+
+This is the content of one .kdenlivetitle file. As you can see, its outermost tag has a few properties:
+
+- LC_NUMERIC: unknown, but identical to a .kdenlive project's `<mlt>`.
+- duration_frames: The duration of the clip in frames.
+- height: The height of the clip.
+- width: The width of the clip.
+- out: Cutoff point for the clip in frames, generally identical to duration_frames.
+
+The main content of the file is located within one of several `<item>` tags. These define the text that appears.
+
+The `<item>` tag itself has a few properties:
+
+- type: The Qt type of the item. QGraphicsTextItem for text, QGraphicsEllipseItem for ellipses, and so on.
+- z-index: The index of the z-order of the item. A greater z-index means the item will be placed in front of all items with smaller z-indices.
+
+Additionally, the `<item>` tag has `<position>` and `<content>` tags within.
+
+The `<position>` tag has two properties: `x` and `y`. These are the X and Y positions of the top-left corner of the item respectively. Additionally, it has a `<transform>` tag, which can hold the following properties:
+
+- rotation: The X, Y, and Z rotation respectively of the item in degrees, separated by comma.
+- zoom: The zoom on the item as a percentage. A value of 100 indicates the item is at its normal size.
+
+The content of the `<transform>` tag is the values of the 3x3 transformation matrix that performs all of the transformations specified in its properties.
+
+The `<content>` tag has much more properties, depending on the type of the item. For QGraphicsTextItem:
+
+- alignment: The horizontal text alignment of a text block. 1: Left, 4: Center, 2: Right, 3: Also left (but unused)
+- box-width, box-height: The width and height of the box text is placed in respectively.
+- color: The RGBA components of the text's color, from 0-255.
+- font: The name of the font used for text in this item.
+- font-pixel-size: The size in pixels of the text.
+- font-italic: Whether or not the text is italicized (0: No, 1: Yes)
+- font-underline: Whether or not the text is underlined (0: No, 1: Yes)
+- font-weight: The weight of the font in font weight units. Generally a multiple of 100 from 100-900, where 400 is Regular and 700 is Bold.
+- font-outline: The thickness in pixels of the outline present on each letter.
+- font-outline-color: The RGBA components of the font outline's color, from 0-255.
+- letter-spacing: Added spacing between letters, in pixels. Can be negative.
+- line-spacing: Added spacing between lines of text, in pixels. Can be negative.
+- tab-width: The width of tab characters, in pixels.
+- shadow: Components that define the text's shadow, separated by semicolon. In order...
+	- Whether or not the shadow is enabled. (0: No, 1: Yes)
+	- The color of the shadow as an RGBA hex code (#AARRGGBB)
+	- The blur amount in pixels of the shadow.
+	- The X offset of the shadow.
+	- The Y offset of the shadow.
+- typewriter: Defines an optional typewriter effect for this text. Each component is separated by semicolon. In order...
+	- Whether or not the effect is enabled. (0: No, 1: Yes)
+	- The "Frame Step" of the effect.
+	- The Expansion Mode of the effect (1: By character, 2: By word, 3: By line)
+	- The Variation of the effect.
+	- The Seed of the effect, used for variation.
+
+The content of the `<content>` tag is merely the text itself. Newlines are included as a part of this content as themselves.
+
+Finally, we get to the remaining tags within the `<kdenlivetitle>`. These are the `<startviewport>`, `<endviewport>`, and `<background>` tags.
+
+The `<startviewport>` and `<endviewport>` tags define the start and end viewports respectively. These indicate where on screen the contents of the title should display. They both have one property, `rect`, which defines a rectangle for the viewport. In order, its 4 components are the X position of the top-left corner, the Y position of the top-left corner, the width, and the height. Each component is separated by comma.
+
+Finally, the `<background>` tag defines the background color. The background is defined for the part of the clip that appears on screen. It has one property, `color`, which is defined by the RGBA components of the background's color from 0-255, divided by comma.
+
+With that, every property of the .kdenlivetitle has been covered.
+
+
+
 # the general process
+
+This is how the script works in general. It is also how a .kdenlive file can be manually made.
 
 Per Sequence:
 

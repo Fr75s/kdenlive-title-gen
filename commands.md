@@ -42,6 +42,7 @@ Sections headers are denoted by `##` at the start of their line. These display d
 Comments are made by having a `/=/` at the beginning of a line. In doing so, all text until the next line will be ignored. There are currently no inline comments.
 
 
+
 ## commands
 
 Commands are standalone instructions that are read by the document parser. These are in their own blocks of text; placing a command alongside text or a modifier in a block will result in an error. Commands are specified with a `-=-` at the beginning of their line.
@@ -79,7 +80,7 @@ Commands may also take parameters, as seen in the above example. Parameters for 
 
 It is recommended to separate the command name, `-=-`, and parameters with one space.
 
-You can also specify more than one command in one block.
+You can also specify more than one command in one block. Additionally, you can specify commands in consecutive blocks; all commands will be treated as one block and affect the next clip.
 
 The following is a list of all commands currently available:
 
@@ -95,10 +96,13 @@ Sets the duration in between two content clips where no text is shown to TIME se
 
 Ignores the next content block, if it exists. This will make it not appear in the video, and a `.kdenlivetitle` will not be created for this block.
 
+Any other commands next to this ignore will act upon the next non-ignored block.
+
+
 
 ## modifiers
 
-Modifiers are instructions that are appended to content blocks. They can be placed anywhere within a content block, as long as they are within their own line. Placing more than one modifier in a line will ignore all but the first modifier. Modifiers must be added to blocks which already contain content; standalone modifiers (or modifiers attached to commands) will result in an error. More than one modifier can be placed in a single block.
+Modifiers are instructions that are appended to content blocks or section headers. They can be placed anywhere within a content block, as long as they are within their own line. Placing more than one modifier in a line will ignore all but the first modifier. Modifiers must be added to blocks which already contain content; standalone modifiers (or modifiers attached to commands) will result in an error. More than one modifier can be placed in a single block.
 
 Modifiers are specified with their keyword in double curly brackets (`{{}}`). Parameters for modifiers are passed in a single parentheses (`()`) after the curly brackets.
 
