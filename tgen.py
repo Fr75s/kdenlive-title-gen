@@ -104,7 +104,7 @@ Y_CENTER = 860
 # Internal Vars
 #
 
-DEBUG = True
+DEBUG = False
 
 errors = {
 	"general": "General Error",
@@ -161,6 +161,7 @@ CFG_PROJDIR = ""
 
 # general helpers
 
+# Prints a debug message. Will only print if the internal DEBUG variable is true.
 def pdb(msg: str):
 	if DEBUG:
 		print(f"* DEBUG: {msg}")
@@ -493,7 +494,6 @@ def create_sequence(seq_idx: int, sequence: list[dict], start_id: int, folder_ob
 #
 # layout: The layout data for a video, acquired by using json.loads on the contents
 # of the layout.json file.
-#
 def layout_to_sequences(layout: list[dict]) -> list[list[dict]]:
 	sections = [[]]
 	section = 0
@@ -517,6 +517,9 @@ def layout_to_sequences(layout: list[dict]) -> list[list[dict]]:
 # clip_data_to_titleclips Helpers
 
 # Converts a color tuple to a color code, separated by comma.
+#
+# color_tuple: A tuple of 4 integer values from 0-255, containing the red, green,
+# blue, and alpha components of a color respectively.
 def color_code(color_tuple: tuple[int, int, int, int]) -> str:
 	return f"{color_tuple[0]},{color_tuple[1]},{color_tuple[2]},{color_tuple[3]}"
 
@@ -593,7 +596,10 @@ def break_text_by_font_width(text: str, font: str, font_size: int, max_width: in
 # Checks a list of parameters for type validity based on the given keyword and corresponding
 # command definition.
 #
-#
+# keyword: The keyword for a given command.
+# params: The list of parameters acquired from the command line, as a list of strings.
+# modifier: Whether or not to use the modifiers list. This ensures commands with modifier
+# keywords are not checked and vice versa.
 #
 # Returns whether or not the given parameter list is a valid set for the given command.
 def check_paramlist_validity(keyword: str, params: list[str], modifier: bool = False) -> bool:
@@ -673,8 +679,8 @@ def check_paramlist_validity(keyword: str, params: list[str], modifier: bool = F
 #
 # line: The entire command line to parse.
 #
-# Returns a tuple containing two elements. The first is the keyword of the command, the second is
-# a list of its parameters as a string.
+# Returns a tuple containing two elements. The first is the keyword of the command,
+# the second is a list of its parameters as a string.
 def parse_command(line: str) -> tuple[str, list[str]]:
 	# Check if command
 	if (line[0:3] != "-=-"):
@@ -746,7 +752,15 @@ def parse_commands(lines: list[str], line_num: int) -> list[tuple[str, list[str]
 	return cmd_list
 
 
-def parse_modifiers(lines: list[str]) -> dict:
+# Parses the given block for modifiers, ensuring all modifiers are valid.
+# See the documentation for more details regarding modifiers and their syntax.
+#
+# lines: The list of lines that form this command block.
+# line_num: The number of the first line of the command block in the markdown file.
+#
+# Returns the list of modifiers as a dictionary, with the key being the modifier's keyword
+# and the value being the list of parameters the modifier has as an all-string list.
+def parse_modifiers(lines: list[str], line_num: int)) -> dict[str, list[str]]:
 	current_modifiers = {}
 
 	for i in range(len(lines)):
@@ -756,7 +770,7 @@ def parse_modifiers(lines: list[str]) -> dict:
 		if li[0:1] == "{{":
 			last_i = li.find("}}")
 			if (last_i == -1):
-				print_error("mp", "Unclosed Modifier Keyword")
+				print_error("mp", f"Unclosed Modifier Keyword (Line {i + line_num})")
 				return {"error": True}
 			else:
 				# Get modifier keyword
@@ -772,20 +786,18 @@ def parse_modifiers(lines: list[str]) -> dict:
 					if (len(params) == 1 and len(params[0]) == 0):
 						params = []
 				if (param_i != -1 and param_end_i == -1 or param_i == -1 and param_end_i != -1):
-					print_error("mp", "Unclosed Parameter Block.")
+					print_error("mp", f"Unclosed Parameter Block (Line {i + line_num})")
 					return {"error": True}
 
 				params_valid = check_paramlist_validity(keyword, params, modifier=True)
 				if not(params_valid):
-					print_error("mp", "Invalid Parameters")
+					print_error("mp", f"Invalid Parameters (Line {i + line_num})")
 					return {"error": True}
 
 				# Create Modifier
 				current_modifiers[keyword] = params
 
 	return current_modifiers
-
-
 
 
 #
@@ -1406,7 +1418,7 @@ def parse_file(f):
 			this_clip = {}
 
 			# Parse for modifiers
-			this_clip["modifiers"] = parse_modifiers(lines)
+			this_clip["modifiers"] = parse_modifiers(lines, line_no)
 
 			# Coalesce lines into content
 			block_text = ""

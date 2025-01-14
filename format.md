@@ -852,7 +852,7 @@ A .kdenlive title is much shorter than a full project document. The XML for a .k
 
 This is the content of one .kdenlivetitle file. As you can see, its outermost tag has a few properties:
 
-- LC_NUMERIC: unknown, but identical to a .kdenlive project's `<mlt>`.
+- LC_NUMERIC: unknown, but identical to the respective property in a .kdenlive project's `<mlt>`.
 - duration_frames: The duration of the clip in frames.
 - height: The height of the clip.
 - width: The width of the clip.
