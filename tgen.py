@@ -166,6 +166,10 @@ def pdb(msg: str):
 	if DEBUG:
 		print(f"* DEBUG: {msg}")
 
+# Prints a warning message.
+def pwrn(msg: str):
+	print(f"WARN: {msg}")
+
 # Prints the given error with the given error key.
 def print_error(error_key: str, msg: str):
 	print(f"{errors[error_key]}: {msg}")
@@ -527,6 +531,18 @@ def layout_to_sequences(layout: list[dict]) -> list[list[dict]]:
 # blue, and alpha components of a color respectively.
 def color_code(color_tuple: tuple[int, int, int, int]) -> str:
 	return f"{color_tuple[0]},{color_tuple[1]},{color_tuple[2]},{color_tuple[3]}"
+
+# Converts a variable-width list of RGB components to a color code, separated by comma.
+#
+# component_list: A list of RGBA components as strings which must be integers from 0-255.
+# The list must be 3 or 4 items long. If the list is 3 items long, the A component is set to 255.
+def color_code_aopt(component_list: list[str]) -> str:
+	if (len(component_list) == 4):
+		return color_code((int(component_list[0]), int(component_list[1]), int(component_list[2]), int(component_list[3])))
+	elif (len(component_list) == 3):
+		return color_code((int(component_list[0]), int(component_list[1]), int(component_list[2]), 255))
+	else:
+		raise ValueError
 
 # Check if any string in broken_text exceeds max_width given some font data.
 # Used as a helper for break_text_by_font_width.
@@ -1208,32 +1224,52 @@ def clip_data_to_titleclips(cd, projdir):
 	if not(os.path.exists(os.path.join(projdir, "titles"))):
 		os.mkdir(os.path.join(projdir, "titles"))
 
+	# Go through each clip in the clip data
 	for i in range(len(cd)):
 		clip = cd[i]
 		tc_entry = {}
-
-		data = ""
 
 		# Set durations
 		tc_entry["duration_frames"] = round(clip["duration"] * FRAMERATE)
 		tc_entry["duration_full"] = r3(clip["duration"])
 		tc_entry["duration_time"] = r3(clip["duration"] - (1.0 / FRAMERATE))
 
-		# Pass modifiers to title clip processor
+		data = f"""<kdenlivetitle LC_NUMERIC="C" duration_frames="{tc_entry["duration_frames"]}" height="{RES_HEIGHT}" out="{tc_entry["duration_frames"]}" width="{RES_WIDTH}">\n"""
+
+		# Pass modifiers to title clip processor in case they are needed (e.g. before_pause)
 		tc_entry["modifiers"] = clip["modifiers"]
 
-		# Format data & specific entries by type
+		# Set default formatting
+		y_pos = 0
+		clip_content = clip["content"]
+
+		# Get modifiers/default values
+		clip_color = color_code_aopt(clip["modifiers"]["color"]) if "color" in clip["modifiers"] else color_code(FONT_COLOR)
+		clip_outline_color = color_code_aopt(clip["modifiers"]["outline_color"]) if "outline_color" in clip["modifiers"] else color_code(FONT_OUTLINE_COLOR)
+
+		clip_font = FONT_NAME
+		if ("font" in clip["modifiers"]):
+			sf = get_system_font(clip["modifiers"]["font"][0])
+			if (sf != None):
+				clip_font = clip["modifiers"]["font"][0]
+			else:
+				pwrn(f"Font modifier for block {i} ({clip_content}) could not be applied due to invalid font.")
+
+		clip_font_size = FONT_SIZE
+
 		match clip["type"]:
 			case "title":
-				# get y positions
-				title_y_pos = RES_HEIGHT // 2 - TITLE_FONT_SIZE // 2
-				if ("y" in clip["modifiers"]):
-					title_y_pos = int(clip["modifiers"]["y"][0]) - TITLE_FONT_SIZE // 2
-				subtitle_y_pos = title_y_pos + TITLE_FONT_SIZE + TITLE_GAP
-				supertitle_y_pos = title_y_pos - TITLE_GAP - SUPERTITLE_FONT_SIZE
+				# Set Values
+				tc_entry["ref"] = "title"
 
-				# Format XML
-				data = f"""<kdenlivetitle LC_NUMERIC="C" duration_frames="{tc_entry["duration_frames"]}" height="{RES_HEIGHT}" out="{tc_entry["duration_frames"]}" width="{RES_WIDTH}"\n"""
+				# get y positions
+				y_pos = RES_HEIGHT // 2 - TITLE_FONT_SIZE // 2
+				if ("y" in clip["modifiers"]):
+					y_pos = int(clip["modifiers"]["y"][0]) - TITLE_FONT_SIZE // 2
+				subtitle_y_pos = y_pos + TITLE_FONT_SIZE + TITLE_GAP
+				supertitle_y_pos = y_pos - TITLE_GAP - SUPERTITLE_FONT_SIZE
+
+				clip_font_size = TITLE_FONT_SIZE
 
 				# Add optional subtitle
 				if ("subtitle" in clip):
@@ -1252,71 +1288,49 @@ def clip_data_to_titleclips(cd, projdir):
   </position>
   <content alignment="4" box-height="{RES_HEIGHT}" box-width="{RES_WIDTH}" font="{FONT_NAME}" font-color="{color_code(SUPERTITLE_FONT_COLOR)}" font-italic="0" font-outline="{FONT_OUTLINE_THICK}" font-outline-color="{color_code(FONT_OUTLINE_COLOR)}" font-pixel-size="{SUPERTITLE_FONT_SIZE}" font-underline="0" font-weight="{SUBSUPER_FONT_WEIGHT}" letter-spacing="0" line-spacing="0" shadow="0;#64000000;3;3;3" tab-width="80" typewriter="0;2;1;0;0">{clip["supertitle"]}</content>
  </item>\n"""
-
-				# Add title and more
-				data += f""" <item type="QGraphicsTextItem" z-index="0">
-  <position x="0" y="{title_y_pos}">
-   <transform>1,0,0,0,1,0,0,0,1</transform>
-  </position>
-  <content alignment="4" box-height="{RES_HEIGHT}" box-width="{RES_WIDTH}" font="{FONT_NAME}" font-color="{color_code(FONT_COLOR)}" font-italic="0" font-outline="{FONT_OUTLINE_THICK}" font-outline-color="{color_code(FONT_OUTLINE_COLOR)}" font-pixel-size="{TITLE_FONT_SIZE}" font-underline="0" font-weight="{TITLE_FONT_WEIGHT}" letter-spacing="0" line-spacing="0" shadow="0;#64000000;3;3;3" tab-width="80" typewriter="0;2;1;0;0">{clip["title"]}</content>
- </item>
- <startviewport rect="0,0,{RES_WIDTH},{RES_HEIGHT}"/>
- <endviewport rect="0,0,{RES_WIDTH},{RES_HEIGHT}"/>
- <background color="0,0,0,0"/>
-</kdenlivetitle>"""
-
-				# Set Values
-				tc_entry["ref"] = "title"
 			case "section":
-				# create section clip
-				y_pos = RES_HEIGHT // 2 - SECTION_FONT_SIZE // 2
-				if ("y" in clip["modifiers"]):
-					y_pos = int(clip["modifiers"]["y"][0]) - SECTION_FONT_SIZE // 2
-
-				data = f"""<kdenlivetitle LC_NUMERIC="C" duration_frames="{tc_entry["duration_frames"]}" height="{RES_HEIGHT}" out="{tc_entry["duration_frames"]}" width="{RES_WIDTH}">
- <item type="QGraphicsTextItem" z-index="0">
-  <position x="0" y="{y_pos}">
-   <transform>1,0,0,0,1,0,0,0,1</transform>
-  </position>
-  <content alignment="4" box-height="{RES_HEIGHT}" box-width="{RES_WIDTH}" font="{FONT_NAME}" font-color="{color_code(FONT_COLOR)}" font-italic="0" font-outline="{FONT_OUTLINE_THICK}" font-outline-color="{color_code(FONT_OUTLINE_COLOR)}" font-pixel-size="{SECTION_FONT_SIZE}" font-underline="0" font-weight="{TITLE_FONT_WEIGHT}" letter-spacing="0" line-spacing="0" shadow="0;#ff000000;8;0;0" tab-width="80" typewriter="0;2;1;0;0">{clip["content"]}</content>
- </item>
- <startviewport rect="0,0,{RES_WIDTH},{RES_HEIGHT}"/>
- <endviewport rect="0,0,{RES_WIDTH},{RES_HEIGHT}"/>
- <background color="0,0,0,0"/>
-</kdenlivetitle>"""
-
 				# Set Values
 				section_idx += 1
 				content_idx = 0
 
 				tc_entry["ref"] = f"section_{section_idx}"
+
+				# create section clip
+				y_pos = RES_HEIGHT // 2 - SECTION_FONT_SIZE // 2
+				if ("y" in clip["modifiers"]):
+					y_pos = int(clip["modifiers"]["y"][0]) - SECTION_FONT_SIZE // 2
+
+				clip_font_size = SECTION_FONT_SIZE
+
 			case "content":
-				# create content clip
+				# Set Values
+				content_idx += 1
+				tc_entry["ref"] = f"content_s{section_idx}_c{content_idx}"
+
 				# split this content so that it fits on screen width-wise.
 				lines = break_text_by_font_width(clip["content"], FONT_NAME, FONT_SIZE, MAX_CONTENT_WIDTH)
+				clip_content = "\n".join(lines)
 
 				# Get Y from Y_CENTER
 				y_pos = Y_CENTER - round((len(lines) / 2.0) * FONT_SIZE)
 				if ("y" in clip["modifiers"]):
 					y_pos = int(clip["modifiers"]["y"][0]) - round((len(lines) / 2.0) * FONT_SIZE)
 
-				# Form XML data
-				data = f"""<kdenlivetitle LC_NUMERIC="C" duration_frames="{tc_entry["duration_frames"]}" height="{RES_HEIGHT}" out="{tc_entry["duration_frames"]}" width="{RES_WIDTH}">
- <item type="QGraphicsTextItem" z-index="0">
+		# Apply remaining modifiers
+		if ("font_size" in clip["modifiers"]):
+			clip_font_size = int(clip["modifiers"]["font_size"][0])
+
+		# Add main title
+		data += f""" <item type="QGraphicsTextItem" z-index="0">
   <position x="{(RES_WIDTH - MAX_CONTENT_WIDTH) // 2}" y="{y_pos}">
    <transform>1,0,0,0,1,0,0,0,1</transform>
   </position>
-  <content alignment="4" box-height="{RES_HEIGHT}" box-width="{MAX_CONTENT_WIDTH}" font="{FONT_NAME}" font-color="{color_code(FONT_COLOR)}" font-italic="0" font-outline="{FONT_OUTLINE_THICK}" font-outline-color="{color_code(FONT_OUTLINE_COLOR)}" font-pixel-size="{FONT_SIZE}" font-underline="0" font-weight="{FONT_WEIGHT}" letter-spacing="0" line-spacing="0" shadow="0;#ff000000;8;0;0" tab-width="80" typewriter="0;2;1;0;0">{"\n".join(lines)}</content>
+  <content alignment="4" box-height="{RES_HEIGHT}" box-width="{MAX_CONTENT_WIDTH}" font="{clip_font}" font-color="{clip_color}" font-italic="0" font-outline="{FONT_OUTLINE_THICK}" font-outline-color="{clip_outline_color}" font-pixel-size="{clip_font_size}" font-underline="0" font-weight="{FONT_WEIGHT}" letter-spacing="0" line-spacing="0" shadow="0;#ff000000;8;0;0" tab-width="80" typewriter="0;2;1;0;0">{clip_content}</content>
  </item>
  <startviewport rect="0,0,{RES_WIDTH},{RES_HEIGHT}"/>
  <endviewport rect="0,0,{RES_WIDTH},{RES_HEIGHT}"/>
  <background color="0,0,0,0"/>
 </kdenlivetitle>"""
-
-				# Set Values
-				content_idx += 1
-
-				tc_entry["ref"] = f"content_s{section_idx}_c{content_idx}"
 
 		# Write kdenlivetitle XML to file
 		with open(os.path.join(projdir, "titles", f"{tc_entry["ref"]}.kdenlivetitle"), "w") as klt:
@@ -1364,7 +1378,7 @@ def parse_file(f):
 			lt = line[:-1]
 			# Get title field
 			if ("title:" in lt[0:6]):
-				clip_data[0]["title"] = lt[7:]
+				clip_data[0]["content"] = lt[7:]
 
 			# Get subtitle field
 			if ("subtitle:" in lt[0:9]):
@@ -1381,7 +1395,7 @@ def parse_file(f):
 		clip_data[0]["modifiers"] = parse_modifiers(title_lines, 1)
 
 		# Frontmatter check 2
-		if (line != "---\n" or not "title" in clip_data[0]):
+		if (line != "---\n" or not "content" in clip_data[0]):
 			if (line != "---\n"):
 				print_error("dp", "Frontmatter incomplete.")
 			else:
@@ -1414,7 +1428,7 @@ def parse_file(f):
 				line = inp.readline()
 				line_no += 1
 
-			pdb(f"Block Read: {lines}")
+			pdb(f"Block Read: {lines} (now @{line_no})")
 
 			if (len(lines) == 0):
 				line = inp.readline()
@@ -1427,7 +1441,7 @@ def parse_file(f):
 				if (line[0:3] == "-=-"):
 					# Command block
 					command_block = True
-					command_list = parse_commands(lines, line_no)
+					command_list = parse_commands(lines, line_no - len(lines) + 1)
 
 					if (command_list == []):
 						print_error("dp", "An error occurred while parsing a command block.")
@@ -1457,7 +1471,7 @@ def parse_file(f):
 			this_clip = {}
 
 			# Parse for modifiers
-			this_clip["modifiers"] = parse_modifiers(lines, line_no)
+			this_clip["modifiers"] = parse_modifiers(lines, line_no - len(lines) + 1)
 			if (this_clip["modifiers"]["error"]):
 				return []
 

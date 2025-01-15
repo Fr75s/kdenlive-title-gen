@@ -108,7 +108,7 @@ Modifiers are instructions that are appended to content blocks or section header
 
 Modifiers must be added to blocks which already contain content; standalone modifiers (or modifiers attached to commands) will result in an error. More than one modifier can be placed in a single block. If multiple of the same modifier are placed in the block, only the last one sequentially will take effect.
 
-Additionally, modifiers can be placed within the frontmatter; this will apply the modifier to the title clip. Only some modifiers work for the title clip; these modifiers will be marked by "(TITLE)" in the documentation. It is best to modify the configuration values of the script for different titles.
+Additionally, modifiers can be placed within the frontmatter; this will apply the modifier to the title clip. Only some modifiers work as fully intended for the title clip; these modifiers will be marked by "(TITLE)" in the documentation. It is best to modify the configuration values of the script for different title styles.
 
 Modifiers are specified with their keyword in double curly brackets (`{{}}`). Parameters for modifiers are passed in a single parentheses (`()`) after the curly brackets.
 
