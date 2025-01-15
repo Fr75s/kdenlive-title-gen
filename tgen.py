@@ -543,6 +543,24 @@ def none_exceed_max_width(broken_text: list[str], max_width: int, font) -> int:
 			return i
 	return -1
 
+# Attempts to get the given font from the system's installed fonts.
+#
+# font: The name of the font.
+# font_size: The size of the font.
+#
+# Returns an ImageFont object for the font if found, otherwise returns None.
+def get_system_font(font: str, font_size: int = 16):
+	ifont = None
+	try:
+		ifont = ImageFont.truetype(font + ".ttf", font_size)
+	except OSError:
+		try:
+			ifont = ImageFont.truetype(font + ".otf", font_size)
+		except:
+			pass
+
+	return ifont
+
 # Splits a string of text so that, given a font and size, the text does not
 # exceed max_width pixels in width.
 #
@@ -554,14 +572,9 @@ def none_exceed_max_width(broken_text: list[str], max_width: int, font) -> int:
 # Returns an empty list if an error occurred.
 def break_text_by_font_width(text: str, font: str, font_size: int, max_width: int) -> list[str]:
 	# Attempt to load font
-	ifont = None
-	try:
-		ifont = ImageFont.truetype(font + ".ttf", font_size)
-	except OSError:
-		try:
-			ifont = ImageFont.truetype(font + ".otf", font_size)
-		except:
-			return []
+	ifont = get_system_font(font, font_size)
+	if (ifont == None):
+		return []
 
 	broken_text = [text]
 
@@ -623,9 +636,11 @@ def check_paramlist_validity(keyword: str, params: list[str], modifier: bool = F
 			# Split by restriction
 			split_type = combined_type.split(";")
 
+			pdb(f"Param {i} ({params[i]}) should be of type {split_type}")
+
 			# Get restriction on range of values if it exists
 			split_range = []
-			if (len(split_type) != 0):
+			if (len(split_type) >= 2):
 				str_split_range = split_type[1].split("-")
 				# Add lower bound
 				split_range.append(int(str_split_range[0]))
@@ -633,7 +648,7 @@ def check_paramlist_validity(keyword: str, params: list[str], modifier: bool = F
 				if (len(str_split_range) > 0 and str_split_range[1] != ""):
 					split_range.append(int(str_split_range[1]))
 
-			pdb(f"Param {i} ({params[i]}) should be of type {split_type}, with range {split_range}")
+				pdb(f"type has Range LB/UB {split_range}")
 
 			# Check General Type
 			match split_type[0]:
@@ -772,7 +787,7 @@ def parse_modifiers(lines: list[str], line_num: int) -> dict[str, list[str]]:
 		li = lines[i].replace(" ", "")
 
 		# Check if line specifies a modifier
-		if li[0:1] == "{{":
+		if li[0:2] == "{{":
 			last_i = li.find("}}")
 			if (last_i == -1):
 				print_error("mp", f"Unclosed Modifier Keyword (Line {i + line_num})")
@@ -781,9 +796,11 @@ def parse_modifiers(lines: list[str], line_num: int) -> dict[str, list[str]]:
 				# Get modifier keyword
 				keyword = li[2:last_i]
 
+				pdb(f"Parsing Modifier ({keyword})")
+
 				# Get params
-				param_i = line.find("(")
-				param_end_i = line.find(")")
+				param_i = li.find("(")
+				param_end_i = li.find(")")
 
 				params = []
 				if (param_i != -1 and param_end_i != -1):
@@ -1210,11 +1227,13 @@ def clip_data_to_titleclips(cd, projdir):
 			case "title":
 				# get y positions
 				title_y_pos = RES_HEIGHT // 2 - TITLE_FONT_SIZE // 2
+				if ("y" in clip["modifiers"]):
+					title_y_pos = int(clip["modifiers"]["y"][0]) - TITLE_FONT_SIZE // 2
 				subtitle_y_pos = title_y_pos + TITLE_FONT_SIZE + TITLE_GAP
 				supertitle_y_pos = title_y_pos - TITLE_GAP - SUPERTITLE_FONT_SIZE
 
 				# Format XML
-				data = f"""<kdenlivetitle LC_NUMERIC="C" duration_frames="{duration_frames}" height="{RES_HEIGHT}" out="{duration_frames}" width="{RES_WIDTH}"\n"""
+				data = f"""<kdenlivetitle LC_NUMERIC="C" duration_frames="{tc_entry["duration_frames"]}" height="{RES_HEIGHT}" out="{tc_entry["duration_frames"]}" width="{RES_WIDTH}"\n"""
 
 				# Add optional subtitle
 				if ("subtitle" in clip):
@@ -1251,8 +1270,10 @@ def clip_data_to_titleclips(cd, projdir):
 			case "section":
 				# create section clip
 				y_pos = RES_HEIGHT // 2 - SECTION_FONT_SIZE // 2
+				if ("y" in clip["modifiers"]):
+					y_pos = int(clip["modifiers"]["y"][0]) - SECTION_FONT_SIZE // 2
 
-				data = f"""<kdenlivetitle LC_NUMERIC="C" duration_frames="{duration_frames}" height="{RES_HEIGHT}" out="{duration_frames}" width="{RES_WIDTH}">
+				data = f"""<kdenlivetitle LC_NUMERIC="C" duration_frames="{tc_entry["duration_frames"]}" height="{RES_HEIGHT}" out="{tc_entry["duration_frames"]}" width="{RES_WIDTH}">
  <item type="QGraphicsTextItem" z-index="0">
   <position x="0" y="{y_pos}">
    <transform>1,0,0,0,1,0,0,0,1</transform>
@@ -1276,9 +1297,11 @@ def clip_data_to_titleclips(cd, projdir):
 
 				# Get Y from Y_CENTER
 				y_pos = Y_CENTER - round((len(lines) / 2.0) * FONT_SIZE)
+				if ("y" in clip["modifiers"]):
+					y_pos = int(clip["modifiers"]["y"][0]) - round((len(lines) / 2.0) * FONT_SIZE)
 
 				# Form XML data
-				data = f"""<kdenlivetitle LC_NUMERIC="C" duration_frames="{duration_frames}" height="{RES_HEIGHT}" out="{duration_frames}" width="{RES_WIDTH}">
+				data = f"""<kdenlivetitle LC_NUMERIC="C" duration_frames="{tc_entry["duration_frames"]}" height="{RES_HEIGHT}" out="{tc_entry["duration_frames"]}" width="{RES_WIDTH}">
  <item type="QGraphicsTextItem" z-index="0">
   <position x="{(RES_WIDTH - MAX_CONTENT_WIDTH) // 2}" y="{y_pos}">
    <transform>1,0,0,0,1,0,0,0,1</transform>

@@ -104,7 +104,11 @@ Any other commands next to an `ignore` will act upon the next non-ignored block.
 
 ## modifiers
 
-Modifiers are instructions that are appended to content blocks or section headers. They can be placed anywhere within a content block, as long as they are within their own line. Placing more than one modifier in a line will ignore all but the first modifier. Modifiers must be added to blocks which already contain content; standalone modifiers (or modifiers attached to commands) will result in an error. More than one modifier can be placed in a single block.
+Modifiers are instructions that are appended to content blocks or section headers. They can be placed anywhere within a content block, as long as they are within their own line. Placing more than one modifier in a line will ignore all but the first modifier. 
+
+Modifiers must be added to blocks which already contain content; standalone modifiers (or modifiers attached to commands) will result in an error. More than one modifier can be placed in a single block. If multiple of the same modifier are placed in the block, only the last one sequentially will take effect.
+
+Additionally, modifiers can be placed within the frontmatter; this will apply the modifier to the title clip. Only some modifiers work for the title clip; these modifiers will be marked by "(TITLE)" in the documentation. It is best to modify the configuration values of the script for different titles.
 
 Modifiers are specified with their keyword in double curly brackets (`{{}}`). Parameters for modifiers are passed in a single parentheses (`()`) after the curly brackets.
 
@@ -170,6 +174,8 @@ Sets the size of the text in the text block to VALUE. VALUE will be the height o
 Sets the color of the outline of the text in the text block to the given color (in RGB components from 0-255). If no `A` parameter is specified, the text will be fully opaque.
 
 ### y
+
+**(TITLE)**
 
 - `y (VALUE: int)`
 
