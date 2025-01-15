@@ -2,6 +2,10 @@
 
 This documents list special syntax needed to take full advantage of this script. This document also lists all commands and modifiers supported by this script, as well as explains how to use them.
 
+- [syntax](#general-syntax)
+- [commands](#commands)
+- [modifiers](#modifiers)
+
 ## general syntax
 
 Take the following basic document as an example of a well-formed document.

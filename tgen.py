@@ -150,7 +150,7 @@ modifiers = {
 #
 
 from PIL import ImageFont
-import os, sys, json, math, time, uuid, hashlib
+import os, sys, json, math, time, uuid, hashlib, pathlib, platform
 
 CFG_FILE = ""
 CFG_PROJDIR = ""
@@ -562,20 +562,42 @@ def none_exceed_max_width(broken_text: list[str], max_width: int, font) -> int:
 # Attempts to get the given font from the system's installed fonts.
 #
 # font: The name of the font.
-# font_size: The size of the font.
 #
-# Returns an ImageFont object for the font if found, otherwise returns None.
-def get_system_font(font: str, font_size: int = 16):
-	ifont = None
-	try:
-		ifont = ImageFont.truetype(font + ".ttf", font_size)
-	except OSError:
-		try:
-			ifont = ImageFont.truetype(font + ".otf", font_size)
-		except:
-			pass
+# Returns the path of the font if it was found, otherwise returns a blank string.
+def get_system_font(font: str):
+	# Get OS to find directories with installed fonts
+	paths = []
+	os_name = platform.system()
+	if (os_name == "Windows"):
+		paths = ["C:\\Windows\\fonts"]
+	elif (os_name == "Darwin"):
+		HOME = str(pathlib.Path.home())
+		paths = ["/Library/Fonts/", "/System/Library/Fonts/", f"{HOME}/Library/Fonts/"]
+	else:
+		if (os_name != "Linux"):
+			pwrn("Unsupported OS, font finder may fail.")
+		HOME = str(pathlib.Path.home())
+		paths = [f"{HOME}/.local/share/fonts/", "/usr/local/share/fonts", "/usr/share/fonts"]
 
-	return ifont
+	# Find font
+	font_path = ""
+	font_found = False
+	pdb(f"Finding Font {font}")
+	for font_dir in paths:
+		for path, subdirs, filenames in os.walk(font_dir):
+			for filename in filenames:
+				if (font.lower() in filename.lower()):
+					font_path = os.path.join(path, filename)
+					font_found = True
+					break
+			if font_found:
+				break
+		if font_found:
+			break
+
+	pdb(f"Path for font {font}: {font_path}")
+
+	return font_path
 
 # Splits a string of text so that, given a font and size, the text does not
 # exceed max_width pixels in width.
@@ -588,9 +610,18 @@ def get_system_font(font: str, font_size: int = 16):
 # Returns an empty list if an error occurred.
 def break_text_by_font_width(text: str, font: str, font_size: int, max_width: int) -> list[str]:
 	# Attempt to load font
-	ifont = get_system_font(font, font_size)
-	if (ifont == None):
+	font_path = get_system_font(font)
+	if (font_path == ""):
 		return []
+
+	ifont = None
+	try:
+		ifont = ImageFont.truetype(font_path, font_size)
+	except OSError:
+		try:
+			ifont = ImageFont.load(font_path, font_size)
+		except:
+			return []
 
 	broken_text = [text]
 
@@ -1250,26 +1281,30 @@ def clip_data_to_titleclips(cd, projdir):
 		clip_font = FONT_NAME
 		if ("font" in clip["modifiers"]):
 			sf = get_system_font(clip["modifiers"]["font"][0])
-			if (sf != None):
+			if (sf != ""):
 				clip_font = clip["modifiers"]["font"][0]
 			else:
 				pwrn(f"Font modifier for block {i} ({clip_content}) could not be applied due to invalid font.")
 
-		clip_font_size = FONT_SIZE
+		# Apply remaining modifiers
+		clip_font_size = 0
+		if ("font_size" in clip["modifiers"]):
+			clip_font_size = int(clip["modifiers"]["font_size"][0])
 
 		match clip["type"]:
 			case "title":
 				# Set Values
 				tc_entry["ref"] = "title"
+				if (clip_font_size) == 0:
+					clip_font_size = TITLE_FONT_SIZE
 
 				# get y positions
-				y_pos = RES_HEIGHT // 2 - TITLE_FONT_SIZE // 2
+				y_pos = RES_HEIGHT // 2
 				if ("y" in clip["modifiers"]):
-					y_pos = int(clip["modifiers"]["y"][0]) - TITLE_FONT_SIZE // 2
-				subtitle_y_pos = y_pos + TITLE_FONT_SIZE + TITLE_GAP
+					y_pos = int(clip["modifiers"]["y"][0])
+				y_pos -= clip_font_size // 2
+				subtitle_y_pos = y_pos + clip_font_size + TITLE_GAP
 				supertitle_y_pos = y_pos - TITLE_GAP - SUPERTITLE_FONT_SIZE
-
-				clip_font_size = TITLE_FONT_SIZE
 
 				# Add optional subtitle
 				if ("subtitle" in clip):
@@ -1294,31 +1329,34 @@ def clip_data_to_titleclips(cd, projdir):
 				content_idx = 0
 
 				tc_entry["ref"] = f"section_{section_idx}"
+				if (clip_font_size) == 0:
+					clip_font_size = SECTION_FONT_SIZE
 
 				# create section clip
-				y_pos = RES_HEIGHT // 2 - SECTION_FONT_SIZE // 2
+				y_pos = RES_HEIGHT // 2
 				if ("y" in clip["modifiers"]):
-					y_pos = int(clip["modifiers"]["y"][0]) - SECTION_FONT_SIZE // 2
-
-				clip_font_size = SECTION_FONT_SIZE
-
+					y_pos = int(clip["modifiers"]["y"][0])
+				y_pos -= clip_font_size // 2
 			case "content":
 				# Set Values
 				content_idx += 1
 				tc_entry["ref"] = f"content_s{section_idx}_c{content_idx}"
+				if (clip_font_size) == 0:
+					clip_font_size = FONT_SIZE
 
 				# split this content so that it fits on screen width-wise.
-				lines = break_text_by_font_width(clip["content"], FONT_NAME, FONT_SIZE, MAX_CONTENT_WIDTH)
+				lines = break_text_by_font_width(clip["content"], clip_font, clip_font_size, MAX_CONTENT_WIDTH)
+				if (len(lines) == 0):
+					print_error("tc", f"Font for clip ({clip_font}) could not be found.")
+					sys.exit()
+
 				clip_content = "\n".join(lines)
 
 				# Get Y from Y_CENTER
-				y_pos = Y_CENTER - round((len(lines) / 2.0) * FONT_SIZE)
+				y_pos = Y_CENTER
 				if ("y" in clip["modifiers"]):
-					y_pos = int(clip["modifiers"]["y"][0]) - round((len(lines) / 2.0) * FONT_SIZE)
-
-		# Apply remaining modifiers
-		if ("font_size" in clip["modifiers"]):
-			clip_font_size = int(clip["modifiers"]["font_size"][0])
+					y_pos = int(clip["modifiers"]["y"][0])
+				y_pos -= round((len(lines) / 2.0) * clip_font_size)
 
 		# Add main title
 		data += f""" <item type="QGraphicsTextItem" z-index="0">
@@ -1470,17 +1508,26 @@ def parse_file(f):
 
 			this_clip = {}
 
+			# Coalesce lines into content
+			block_text = ""
+			modifiers_present = False
+			for line in lines:
+				if (line[0:2] != "{{"):
+					block_text += line + " "
+				else:
+					modifiers_present = True
+			block_text = block_text[:-1]
+			pdb(f"CONTENT: [{block_text}]")
+
+			# Check if contentless block has modifiers
+			if (modifiers_present and block_text == ""):
+				print_error("dp", "Modifier present with No Content.")
+				return []
+
 			# Parse for modifiers
 			this_clip["modifiers"] = parse_modifiers(lines, line_no - len(lines) + 1)
 			if (this_clip["modifiers"]["error"]):
 				return []
-
-			# Coalesce lines into content
-			block_text = ""
-			for line in lines:
-				if (line[0:2] != "{{"):
-					block_text += line + " "
-			block_text = block_text[:-1]
 
 			if (block_text[0:2] == "##"):
 				# section clip
