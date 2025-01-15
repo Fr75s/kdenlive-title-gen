@@ -96,7 +96,9 @@ Sets the duration in between two content clips where no text is shown to TIME se
 
 Ignores the next content block, if it exists. This will make it not appear in the video, and a `.kdenlivetitle` will not be created for this block.
 
-Any other commands next to this ignore will act upon the next non-ignored block.
+Ignoring a section header will bypass the header and will not create a new Sequence.
+
+Any other commands next to an `ignore` will act upon the next non-ignored block.
 
 
 

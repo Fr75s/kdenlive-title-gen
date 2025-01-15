@@ -349,6 +349,7 @@ def prepare_sequence_blanks(seq_idx: int, audio_track_count: int = 2):
 #   "uuid": The UUID of the sequence
 #   "id": The numeric ID of the sequence's tractor
 #   "seq_dur": The duration of the sequence in seconds.
+#   "before_pause": The duration of the gap before the section.
 def create_sequence(seq_idx: int, sequence: list[dict], start_id: int, folder_obj: dict, projdir: str, main_uuid: str) -> tuple[str, int, dict]:
 	out = ""
 
@@ -388,7 +389,10 @@ def create_sequence(seq_idx: int, sequence: list[dict], start_id: int, folder_ob
 
 		# Add blank
 		if (i < len(sequence) - 1):
-			if (i == 0):
+			if ("before_pause" in sequence[i + 1]["modifiers"]):
+				out += f"""<blank length="{seconds_to_timestamp(sequence[i + 1]["modifiers"]["before_pause"])}"/>"""
+				sequence_len += sequence[i + 1]["modifiers"]["before_pause"]
+			elif (i == 0):
 				out += f"""<blank length="{seconds_to_timestamp(SECTION_GAP)}"/>"""
 				sequence_len += SECTION_GAP
 			else:
@@ -487,7 +491,8 @@ def create_sequence(seq_idx: int, sequence: list[dict], start_id: int, folder_ob
 	return (out, start_id + len(sequence) + 2, {
 		"uuid": sequence_uuid,
 		"id": start_id + len(sequence) + 1,
-		"seq_dur": sequence_len
+		"seq_dur": sequence_len,
+		"before_pause": sequence[0]["modifiers"]["before_pause"] if "before_pause" in sequence[0]["modifiers"] else SECTION_GAP
 	})
 
 # Converts a layout object (as saved in layout.json) to a list of sequences.
@@ -693,7 +698,7 @@ def parse_command(line: str) -> tuple[str, list[str]]:
 
 	# Check if no params
 	if (param_i == -1):
-		param_i = len(line) - 2
+		param_i = len(line)
 	elif (param_end_i == -1):
 		return ("ERROR_UNCLOSED_PARAMS", [])
 
@@ -760,7 +765,7 @@ def parse_commands(lines: list[str], line_num: int) -> list[tuple[str, list[str]
 #
 # Returns the list of modifiers as a dictionary, with the key being the modifier's keyword
 # and the value being the list of parameters the modifier has as an all-string list.
-def parse_modifiers(lines: list[str], line_num: int)) -> dict[str, list[str]]:
+def parse_modifiers(lines: list[str], line_num: int) -> dict[str, list[str]]:
 	current_modifiers = {}
 
 	for i in range(len(lines)):
@@ -797,6 +802,7 @@ def parse_modifiers(lines: list[str], line_num: int)) -> dict[str, list[str]]:
 				# Create Modifier
 				current_modifiers[keyword] = params
 
+	current_modifiers["error"] = False
 	return current_modifiers
 
 
@@ -871,19 +877,25 @@ def titleclips_to_kdenlive(projdir):
 	output += f"""<playlist id="seq0_a2b1">
 <property name="kdenlive:audio_track">1</property>\n"""
 
+	# Calculate the length of the main sequence before all other sequences are added
 	len_sum = 0.0
 	for i in range(len(sequences[-1])):
 		len_sum += sequences[-1][i]["duration_full"]
 		if (i < len(sequences[-1]) - 1):
-			len_sum += SECTION_GAP if i == 0 else CONTENT_GAP
+			if ("before_pause" in sequences[-1][i + 1]["modifiers"]):
+				len_sum += sequences[-1][i + 1]["modifiers"]["before_pause"]
+			else:
+				len_sum += SECTION_GAP if i == 0 else CONTENT_GAP
 
+	# Add all other sequences to playlist, calculating the final length of the main sequence.
 	for i in range(len(seq_data)):
-		output += f"""	<blank length="{seconds_to_timestamp(len_sum + SECTION_GAP) if i == 0 else seconds_to_timestamp(SECTION_GAP)}"/>
+		this_gap = seq_data[i]["before_pause"]
+		output += f"""	<blank length="{seconds_to_timestamp(len_sum + this_gap) if i == 0 else seconds_to_timestamp(this_gap)}"/>
 <entry in="00:00:00.000" out="{seconds_to_timestamp(seq_data[i]["seq_dur"])}" producer="{{{seq_data[i]["uuid"]}}}">
 	<property name="kdenlive:maxduration">{seconds_to_frames(seq_data[i]["seq_dur"])}</property>
 	<property name="kdenlive:id">{seq_data[i]["id"]}</property>
 </entry>\n"""
-		len_sum += seq_data[i]["seq_dur"] + SECTION_GAP
+		len_sum += seq_data[i]["seq_dur"] + this_gap
 
 	output += f"""</playlist>
 <playlist id="seq0_a2b2">
@@ -926,6 +938,7 @@ def titleclips_to_kdenlive(projdir):
 	for i in range(len(sequences[-1])):
 		output += title_to_producer(title_obj=sequences[-1][i], projdir=projdir, folder_id=2, clip_id=(base_id + i), producer_id=i, seq_id=0)
 
+	# Create playlist entries for non-sequences
 	output += f"""<playlist id="seq0_v2b1">"""
 	for i in range(len(sequences[-1])):
 		fade_dur = FADE_DURATION if i > 0 else TITLE_FADE_DURATION
@@ -953,15 +966,18 @@ def titleclips_to_kdenlive(projdir):
 
 		# Add blank
 		if (i < len(sequences[-1]) - 1):
-			if (i == 0):
+			if ("before_pause" in sequences[-1][i + 1]["modifiers"]):
+				output += f"""<blank length="{seconds_to_timestamp(sequences[-1][i + 1]["modifiers"]["before_pause"])}"/>"""
+			elif (i == 0):
 				output += f"""<blank length="{seconds_to_timestamp(SECTION_GAP)}"/>\n"""
 			else:
 				output += f"""<blank length="{seconds_to_timestamp(CONTENT_GAP)}"/>\n"""
 
 	base_id += len(sequences[-1])
 
+	# Create playlist entries for sequences
 	for i in range(len(seq_data)):
-		output += f"""	<blank length="{seconds_to_timestamp(SECTION_GAP)}"/>
+		output += f"""	<blank length="{seconds_to_timestamp(seq_data[i]["before_pause"])}"/>
 	<entry in="00:00:00.000" out="{seconds_to_timestamp(seq_data[i]["seq_dur"])}" producer="{{{seq_data[i]["uuid"]}}}">
 		<property name="kdenlive:id">{seq_data[i]["id"]}</property>
 	</entry>\n"""
@@ -1181,18 +1197,26 @@ def clip_data_to_titleclips(cd, projdir):
 
 		data = ""
 
+		# Set durations
+		tc_entry["duration_frames"] = round(clip["duration"] * FRAMERATE)
+		tc_entry["duration_full"] = r3(clip["duration"])
+		tc_entry["duration_time"] = r3(clip["duration"] - (1.0 / FRAMERATE))
+
+		# Pass modifiers to title clip processor
+		tc_entry["modifiers"] = clip["modifiers"]
+
+		# Format data & specific entries by type
 		match clip["type"]:
 			case "title":
-				# get duration_frames
-				duration_frames = round(clip["duration"] * FRAMERATE)
-
 				# get y positions
 				title_y_pos = RES_HEIGHT // 2 - TITLE_FONT_SIZE // 2
 				subtitle_y_pos = title_y_pos + TITLE_FONT_SIZE + TITLE_GAP
 				supertitle_y_pos = title_y_pos - TITLE_GAP - SUPERTITLE_FONT_SIZE
 
+				# Format XML
 				data = f"""<kdenlivetitle LC_NUMERIC="C" duration_frames="{duration_frames}" height="{RES_HEIGHT}" out="{duration_frames}" width="{RES_WIDTH}"\n"""
 
+				# Add optional subtitle
 				if ("subtitle" in clip):
 					data += f""" <item type="QGraphicsTextItem" z-index="2">
   <position x="0" y="{subtitle_y_pos}">
@@ -1201,6 +1225,7 @@ def clip_data_to_titleclips(cd, projdir):
   <content alignment="4" box-height="{RES_HEIGHT}" box-width="{RES_WIDTH}" font="{FONT_NAME}" font-color="{color_code(SUBTITLE_FONT_COLOR)}" font-italic="0" font-outline="{FONT_OUTLINE_THICK}" font-outline-color="{color_code(FONT_OUTLINE_COLOR)}" font-pixel-size="{SUBTITLE_FONT_SIZE}" font-underline="0" font-weight="{SUBSUPER_FONT_WEIGHT}" letter-spacing="0" line-spacing="0" shadow="0;#64000000;3;3;3" tab-width="80" typewriter="0;2;1;0;0">{clip["subtitle"]}</content>
  </item>\n"""
 
+				# Add optional supertitle
 				if ("supertitle" in clip):
 					data += f""" <item type="QGraphicsTextItem" z-index="1">
   <position x="0" y="{supertitle_y_pos}">
@@ -1209,6 +1234,7 @@ def clip_data_to_titleclips(cd, projdir):
   <content alignment="4" box-height="{RES_HEIGHT}" box-width="{RES_WIDTH}" font="{FONT_NAME}" font-color="{color_code(SUPERTITLE_FONT_COLOR)}" font-italic="0" font-outline="{FONT_OUTLINE_THICK}" font-outline-color="{color_code(FONT_OUTLINE_COLOR)}" font-pixel-size="{SUPERTITLE_FONT_SIZE}" font-underline="0" font-weight="{SUBSUPER_FONT_WEIGHT}" letter-spacing="0" line-spacing="0" shadow="0;#64000000;3;3;3" tab-width="80" typewriter="0;2;1;0;0">{clip["supertitle"]}</content>
  </item>\n"""
 
+				# Add title and more
 				data += f""" <item type="QGraphicsTextItem" z-index="0">
   <position x="0" y="{title_y_pos}">
    <transform>1,0,0,0,1,0,0,0,1</transform>
@@ -1222,15 +1248,8 @@ def clip_data_to_titleclips(cd, projdir):
 
 				# Set Values
 				tc_entry["ref"] = "title"
-				tc_entry["duration_frames"] = duration_frames
-				tc_entry["duration_time"] = r3(TITLE_DURATION - (1.0 / FRAMERATE))
-				tc_entry["duration_full"] = r3(TITLE_DURATION)
 			case "section":
 				# create section clip
-
-				# get duration_frames
-				duration_frames = round(clip["duration"] * FRAMERATE)
-
 				y_pos = RES_HEIGHT // 2 - SECTION_FONT_SIZE // 2
 
 				data = f"""<kdenlivetitle LC_NUMERIC="C" duration_frames="{duration_frames}" height="{RES_HEIGHT}" out="{duration_frames}" width="{RES_WIDTH}">
@@ -1250,14 +1269,8 @@ def clip_data_to_titleclips(cd, projdir):
 				content_idx = 0
 
 				tc_entry["ref"] = f"section_{section_idx}"
-				tc_entry["duration_frames"] = duration_frames
-				tc_entry["duration_time"] = r3(clip["duration"] - (1.0 / FRAMERATE))
-				tc_entry["duration_full"] = r3(clip["duration"])
 			case "content":
 				# create content clip
-
-				# get duration_frames
-				duration_frames = round(clip["duration"] * FRAMERATE)
 				# split this content so that it fits on screen width-wise.
 				lines = break_text_by_font_width(clip["content"], FONT_NAME, FONT_SIZE, MAX_CONTENT_WIDTH)
 
@@ -1281,16 +1294,15 @@ def clip_data_to_titleclips(cd, projdir):
 				content_idx += 1
 
 				tc_entry["ref"] = f"content_s{section_idx}_c{content_idx}"
-				tc_entry["duration_frames"] = duration_frames
-				tc_entry["duration_time"] = r3(clip["duration"] - (1.0 / FRAMERATE))
-				tc_entry["duration_full"] = r3(clip["duration"])
 
+		# Write kdenlivetitle XML to file
 		with open(os.path.join(projdir, "titles", f"{tc_entry["ref"]}.kdenlivetitle"), "w") as klt:
 			if (data != ""):
 				klt.write(data)
 
 		tc_data.append(tc_entry)
 
+	# Write title clip data to layout.json within the titles folder in the project directory.
 	with open(os.path.join(projdir, "titles", f"layout.json"), "w") as jsc:
 		jsc.write(json.dumps(tc_data))
 
@@ -1323,6 +1335,7 @@ def parse_file(f):
 
 		# Parse frontmatter
 		line = inp.readline()
+		title_lines = [line[:-1]]
 		line_no = 1
 		while (line != "---\n" and line != ""):
 			lt = line[:-1]
@@ -1339,7 +1352,10 @@ def parse_file(f):
 				clip_data[0]["supertitle"] = lt[12:]
 
 			line = inp.readline()
+			title_lines.append(line[:-1])
 			line_no += 1
+
+		clip_data[0]["modifiers"] = parse_modifiers(title_lines, 1)
 
 		# Frontmatter check 2
 		if (line != "---\n" or not "title" in clip_data[0]):
@@ -1419,6 +1435,8 @@ def parse_file(f):
 
 			# Parse for modifiers
 			this_clip["modifiers"] = parse_modifiers(lines, line_no)
+			if (this_clip["modifiers"]["error"]):
+				return []
 
 			# Coalesce lines into content
 			block_text = ""
@@ -1450,7 +1468,7 @@ def parse_file(f):
 
 			# Pause command
 			if (cmd_flags["pause"] != -1):
-				this_clip["before_pause"] = float(cmd_flags["pause"])
+				this_clip["modifiers"]["before_pause"] = float(cmd_flags["pause"])
 				cmd_flags["pause"] = -1
 
 			clip_data.append(this_clip)
