@@ -177,6 +177,12 @@ Sets the size of the text in the text block to VALUE. VALUE will be the height o
 
 Sets the color of the outline of the text in the text block to the given color (in RGB components from 0-255). If no `A` parameter is specified, the text will be fully opaque.
 
+### outline_width
+
+- `outline_width (VALUE: int)`
+
+Sets the thickness of the outline of the text block in pixels to the given value. The value must be greater than or equal to zero.
+
 ### y
 
 **(TITLE)**

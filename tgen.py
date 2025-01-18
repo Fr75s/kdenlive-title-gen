@@ -139,6 +139,9 @@ modifiers = {
 		["int;0-255","int;0-255","int;0-255"],
 		["int;0-255","int;0-255","int;0-255","int;0-255"]
 	],
+	"outline_width": [
+		["int;0-2147483647"]
+	],
 	"y": [
 		["int"]
 	]
@@ -1223,14 +1226,18 @@ def titleclips_to_kdenlive(projdir):
 	<property name="kdenlive:documentnotesversion">2</property>
 	<property name="xml_retain">1</property>\n"""
 
-	for i in range(len(seq_data)):
+	pdb(sequences)
+
+	# Add entries for all clips
+	for i in range(len(sequences)):
 		for j in range(len(sequences[i])):
-			output += f"""	<entry in="00:00:00.000" out="{seconds_to_timestamp(sequences[i][j]["duration_time"])}" producer="seq{i}_clip{j}"/>\n"""
+			output += f"""	<entry in="00:00:00.000" out="{seconds_to_timestamp(sequences[i][j]["duration_time"])}" producer="seq{(i + 1) % len(sequences)}_clip{j}"/>\n"""
 
-	output += f"""	<entry in="00:00:00.000" out="{seconds_to_timestamp(TITLE_DURATION)}" producer="seq0_clip0"/>\n"""
-
+	# Add entries for all sequences
 	for i in range(len(seq_data)):
 		output += f"""	<entry in="00:00:00.000" out="{seconds_to_timestamp(seq_data[i]["seq_dur"])}" producer="{{{seq_data[i]["uuid"]}}}"/>"""
+
+	# Add main sequence entry
 	output += f"""<entry in="00:00:00.000" out="00:01:06.800" producer="{{{main_uuid}}}"/>\n"""
 
 	output += f"""</playlist>
@@ -1290,6 +1297,8 @@ def clip_data_to_titleclips(cd, projdir):
 		clip_font_size = 0
 		if ("font_size" in clip["modifiers"]):
 			clip_font_size = int(clip["modifiers"]["font_size"][0])
+
+		clip_outline_width = int(clip["modifiers"]["outline_width"][0]) if "outline_width" in clip["modifiers"] else FONT_OUTLINE_THICK
 
 		match clip["type"]:
 			case "title":
@@ -1363,7 +1372,7 @@ def clip_data_to_titleclips(cd, projdir):
   <position x="{(RES_WIDTH - MAX_CONTENT_WIDTH) // 2}" y="{y_pos}">
    <transform>1,0,0,0,1,0,0,0,1</transform>
   </position>
-  <content alignment="4" box-height="{RES_HEIGHT}" box-width="{MAX_CONTENT_WIDTH}" font="{clip_font}" font-color="{clip_color}" font-italic="0" font-outline="{FONT_OUTLINE_THICK}" font-outline-color="{clip_outline_color}" font-pixel-size="{clip_font_size}" font-underline="0" font-weight="{FONT_WEIGHT}" letter-spacing="0" line-spacing="0" shadow="0;#ff000000;8;0;0" tab-width="80" typewriter="0;2;1;0;0">{clip_content}</content>
+  <content alignment="4" box-height="{RES_HEIGHT}" box-width="{MAX_CONTENT_WIDTH}" font="{clip_font}" font-color="{clip_color}" font-italic="0" font-outline="{clip_outline_width}" font-outline-color="{clip_outline_color}" font-pixel-size="{clip_font_size}" font-underline="0" font-weight="{FONT_WEIGHT}" letter-spacing="0" line-spacing="0" shadow="0;#ff000000;8;0;0" tab-width="80" typewriter="0;2;1;0;0">{clip_content}</content>
  </item>
  <startviewport rect="0,0,{RES_WIDTH},{RES_HEIGHT}"/>
  <endviewport rect="0,0,{RES_WIDTH},{RES_HEIGHT}"/>
