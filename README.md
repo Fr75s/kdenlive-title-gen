@@ -17,6 +17,8 @@ To use this script, clone this repo and run the following command in a command l
 python3 tgen.py -f [YOUR FILE] -d [FOLDER TO PUT PROJECT FILE IN]
 ```
 
+Run this script with the help flag (`-h` or `--help`) for additional options
+
 ## Additional Information
 
 In order to create this script, I needed to document how Kdenlive's project file format works. [I have compiled my findings in this file](format.md), which walks through a Kdenlive video project file made to look like this script's output when given the file `sample.md`. While this does not cover all details, it is more thorough than the official documentation (as of writing).

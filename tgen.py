@@ -1321,7 +1321,7 @@ def clip_data_to_titleclips(cd, projdir):
   <position x="0" y="{subtitle_y_pos}">
    <transform>1,0,0,0,1,0,0,0,1</transform>
   </position>
-  <content alignment="4" box-height="{RES_HEIGHT}" box-width="{RES_WIDTH}" font="{FONT_NAME}" font-color="{color_code(SUBTITLE_FONT_COLOR)}" font-italic="0" font-outline="{FONT_OUTLINE_THICK}" font-outline-color="{color_code(FONT_OUTLINE_COLOR)}" font-pixel-size="{SUBTITLE_FONT_SIZE}" font-underline="0" font-weight="{SUBSUPER_FONT_WEIGHT}" letter-spacing="0" line-spacing="0" shadow="0;#64000000;3;3;3" tab-width="80" typewriter="0;2;1;0;0">{clip["subtitle"]}</content>
+  <content alignment="4" box-height="{RES_HEIGHT}" box-width="{RES_WIDTH}" font="{FONT_NAME}" font-color="{color_code(SUBTITLE_FONT_COLOR)}" font-italic="0" font-outline="{FONT_OUTLINE_THICK}" font-outline-color="{color_code(FONT_OUTLINE_COLOR)}" font-pixel-size="{SUBTITLE_FONT_SIZE}" font-underline="0" font-weight="{SUBSUPER_FONT_WEIGHT}" letter-spacing="0" line-spacing="0" shadow="1;#80000000;4;0;4" tab-width="80" typewriter="0;2;1;0;0">{clip["subtitle"]}</content>
  </item>\n"""
 
 				# Add optional supertitle
@@ -1330,7 +1330,7 @@ def clip_data_to_titleclips(cd, projdir):
   <position x="0" y="{supertitle_y_pos}">
    <transform>1,0,0,0,1,0,0,0,1</transform>
   </position>
-  <content alignment="4" box-height="{RES_HEIGHT}" box-width="{RES_WIDTH}" font="{FONT_NAME}" font-color="{color_code(SUPERTITLE_FONT_COLOR)}" font-italic="0" font-outline="{FONT_OUTLINE_THICK}" font-outline-color="{color_code(FONT_OUTLINE_COLOR)}" font-pixel-size="{SUPERTITLE_FONT_SIZE}" font-underline="0" font-weight="{SUBSUPER_FONT_WEIGHT}" letter-spacing="0" line-spacing="0" shadow="0;#64000000;3;3;3" tab-width="80" typewriter="0;2;1;0;0">{clip["supertitle"]}</content>
+  <content alignment="4" box-height="{RES_HEIGHT}" box-width="{RES_WIDTH}" font="{FONT_NAME}" font-color="{color_code(SUPERTITLE_FONT_COLOR)}" font-italic="0" font-outline="{FONT_OUTLINE_THICK}" font-outline-color="{color_code(FONT_OUTLINE_COLOR)}" font-pixel-size="{SUPERTITLE_FONT_SIZE}" font-underline="0" font-weight="{SUBSUPER_FONT_WEIGHT}" letter-spacing="0" line-spacing="0" shadow="1;#80000000;4;0;4" tab-width="80" typewriter="0;2;1;0;0">{clip["supertitle"]}</content>
  </item>\n"""
 			case "section":
 				# Set Values
@@ -1372,7 +1372,7 @@ def clip_data_to_titleclips(cd, projdir):
   <position x="{(RES_WIDTH - MAX_CONTENT_WIDTH) // 2}" y="{y_pos}">
    <transform>1,0,0,0,1,0,0,0,1</transform>
   </position>
-  <content alignment="4" box-height="{RES_HEIGHT}" box-width="{MAX_CONTENT_WIDTH}" font="{clip_font}" font-color="{clip_color}" font-italic="0" font-outline="{clip_outline_width}" font-outline-color="{clip_outline_color}" font-pixel-size="{clip_font_size}" font-underline="0" font-weight="{FONT_WEIGHT}" letter-spacing="0" line-spacing="0" shadow="0;#ff000000;8;0;0" tab-width="80" typewriter="0;2;1;0;0">{clip_content}</content>
+  <content alignment="4" box-height="{RES_HEIGHT}" box-width="{MAX_CONTENT_WIDTH}" font="{clip_font}" font-color="{clip_color}" font-italic="0" font-outline="{clip_outline_width}" font-outline-color="{clip_outline_color}" font-pixel-size="{clip_font_size}" font-underline="0" font-weight="{FONT_WEIGHT}" letter-spacing="0" line-spacing="0" shadow="1;#80000000;4;0;4" tab-width="80" typewriter="0;2;1;0;0">{clip_content}</content>
  </item>
  <startviewport rect="0,0,{RES_WIDTH},{RES_HEIGHT}"/>
  <endviewport rect="0,0,{RES_WIDTH},{RES_HEIGHT}"/>
@@ -1522,7 +1522,8 @@ def parse_file(f):
 			modifiers_present = False
 			for line in lines:
 				if (line[0:2] != "{{"):
-					block_text += line + " "
+					# Add to block, stripping unnecessary whitespace
+					block_text += line.strip() + " "
 				else:
 					modifiers_present = True
 			block_text = block_text[:-1]
@@ -1611,11 +1612,15 @@ def parse_flags():
 		print("kdenlive title generator")
 		print()
 		print("Usage: python3 tgen.py [options] -f [file] -d [directory]")
-		print("Flags:")
+		print("Required Flags:")
 		print("  -f\t")
 		print("  --file\tSpecify a markdown script to convert.")
 		print("  -d\t")
 		print("  --directory\tSpecify a directory to save all title clips.")
+		print("Options:")
+		print("  -n\t")
+		print("  --no-proj\tDo not create a project file in this run. Only title clips will be")
+		print("              \tcreated or modified.")
 		sys.exit()
 
 
@@ -1624,6 +1629,8 @@ def main():
 	parse_flags()
 	CFG_FILE = get_flag_arg("f", "file")
 	CFG_PROJDIR = get_flag_arg("d", "directory")
+
+	NO_PROJECT = get_flag_idx("n", "no-proj") != -1
 
 	if not os.path.isfile(CFG_FILE) or not os.path.isdir(CFG_PROJDIR):
 		if os.path.isfile(CFG_FILE):
@@ -1643,7 +1650,8 @@ def main():
 	print("Creating Title Clips...")
 	clip_data_to_titleclips(cdata, CFG_PROJDIR)
 
-	print("Creating Project...")
-	titleclips_to_kdenlive(CFG_PROJDIR)
+	if (not NO_PROJECT):
+		print("Creating Project...")
+		titleclips_to_kdenlive(CFG_PROJDIR)
 
 main()
