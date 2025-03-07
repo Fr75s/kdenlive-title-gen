@@ -5,7 +5,10 @@
 script.md
 
 testing.md
+testing_bk.md
 TESTING/
 
 TODO.md
 sample_proj*/
+
+__pycache__/

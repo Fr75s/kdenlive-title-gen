@@ -25,7 +25,7 @@ TITLE_DURATION = 6.0
 SECTION_DURATION = 3.0
 
 # gap before and after a section/title clip where no text is shown
-SECTION_GAP = 2.5
+SECTION_GAP = 2.0
 
 # gap before content clips where no text is shown
 CONTENT_GAP = 1.0
@@ -249,6 +249,7 @@ def title_to_producer(title_obj: dict, projdir: str, folder_id: int, clip_id: in
 	<property name="aspect_ratio">1</property>
 	<property name="seekable">1</property>
 	<property name="mlt_service">kdenlivetitle</property>
+	<property name="kdenlive:duration">{seconds_to_timestamp(title_obj["duration_full"])}</property>
 	<property name="kdenlive:duration_frames">{frames_to_timestamp(title_obj["duration_frames"])}</property>
 	<property name="xml">was here</property>
 	<property name="kdenlive:folderid">{folder_id}</property>
@@ -369,7 +370,7 @@ def create_sequence(seq_idx: int, sequence: list[dict], start_id: int, folder_ob
 
 	# Form the playlist
 	sequence_len: float = 0.0
-	out += f"""<playlist id="seq{seq_idx}_v2b1">"""
+	out += f"""<playlist id="seq{seq_idx}_v2b1">\n"""
 	for i in range(len(sequence)):
 		# Add entry
 		out += f"""	<entry in="00:00:00.000" out="{seconds_to_timestamp(sequence[i]["duration_time"])}" producer="seq{seq_idx}_clip{i}">
@@ -397,13 +398,13 @@ def create_sequence(seq_idx: int, sequence: list[dict], start_id: int, folder_ob
 		# Add blank
 		if (i < len(sequence) - 1):
 			if ("before_pause" in sequence[i + 1]["modifiers"]):
-				out += f"""<blank length="{seconds_to_timestamp(sequence[i + 1]["modifiers"]["before_pause"])}"/>"""
+				out += f"""<blank length="{seconds_to_timestamp(sequence[i + 1]["modifiers"]["before_pause"])}"/>\n"""
 				sequence_len += sequence[i + 1]["modifiers"]["before_pause"]
 			elif (i == 0):
-				out += f"""<blank length="{seconds_to_timestamp(SECTION_GAP)}"/>"""
+				out += f"""<blank length="{seconds_to_timestamp(SECTION_GAP)}"/>\n"""
 				sequence_len += SECTION_GAP
 			else:
-				out += f"""<blank length="{seconds_to_timestamp(CONTENT_GAP)}"/>"""
+				out += f"""<blank length="{seconds_to_timestamp(CONTENT_GAP)}"/>\n"""
 				sequence_len += CONTENT_GAP
 
 	# Add final playlist and track tractor
@@ -877,12 +878,17 @@ def parse_modifiers(lines: list[str], line_num: int) -> dict[str, list[str]]:
 # WORKING FUNCTIONS
 #
 
+
+# Reads a kdenlive project file to convert tracks with titles to a readable and
+# modifiable JSON format.
+def kdenlive_to_titleclips(projfile):
+	pass
+
+
 # Converts a list of title clip objects to a Kdenlive project.
 # The clips will be placed in the "V2" timeline and have fade in and out effects applied.
 def titleclips_to_kdenlive(projdir):
 	# Init file
-	# NOTE: Currently this only supports 1080p60.
-
 	main_uuid = uuid.uuid4()
 	main_uuid_hash = hashlib.md5(f"{{{main_uuid}}}".encode()).hexdigest()
 
@@ -915,6 +921,7 @@ def titleclips_to_kdenlive(projdir):
 	]
 
 	# Create Header
+	# NOTE: Currently this only supports 1080p60.
 	output = f"""<?xml version='1.0' encoding='utf-8'?>
 <mlt LC_NUMERIC="C" producer="main_bin" root="{os.path.abspath(projdir)}" version="7.28.0">
 	<profile colorspace="709" description="HD 1080p 60 fps" display_aspect_den="9" display_aspect_num="16" frame_rate_den="1" frame_rate_num="{FRAMERATE}" height="{RES_HEIGHT}" progressive="1" sample_aspect_den="1" sample_aspect_num="1" width="{RES_WIDTH}"/>\n"""
@@ -1538,6 +1545,7 @@ def parse_file(f):
 			this_clip["modifiers"] = parse_modifiers(lines, line_no - len(lines) + 1)
 			if (this_clip["modifiers"]["error"]):
 				return []
+			del this_clip["modifiers"]["error"]
 
 			if (block_text[0:2] == "##"):
 				# section clip
