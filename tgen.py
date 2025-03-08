@@ -2,109 +2,24 @@
 # title generation script for kdenlive
 # generates titles for kdenlive from a markdown script
 
+from constants import *
+from templates import *
+from helpers import *
+from retitle import adjust_titles_in_place
+
 #
-# Options
+# IMPORTS
 #
 
-# The outputted width and height of each title clip/project file.
-RES_WIDTH = 1920
-RES_HEIGHT = 1080
+from PIL import ImageFont
+import os, sys, json, math, time, uuid, hashlib, pathlib, platform
 
-# The framerate to process each clip/set as project default to.
-FRAMERATE = 60
-
-
-
-# speed of each clip in words per second
-READ_SPEED = 2.8
-
-# duration_frames of the title clip (the first clip) in seconds
-TITLE_DURATION = 6.0
-
-# duration_frames of a section clip in seconds
-SECTION_DURATION = 3.0
-
-# gap before and after a section/title clip where no text is shown
-SECTION_GAP = 2.0
-
-# gap before content clips where no text is shown
-CONTENT_GAP = 1.0
-
-# time to fade titles in/out
-TITLE_FADE_DURATION = 1.0
-
-# time to fade content/sections in/out
-FADE_DURATION = 0.5
-
-
-
-# Name of the font you wish to use.
-FONT_NAME = "Inter"
-
-# Size of the font you wish to use, in pixels
-FONT_SIZE = 48
-
-# Color components for the font.
-# R, G, B, A; 0-255.
-# Default: White
-FONT_COLOR = (255, 255, 255, 255)
-
-# Outline color for the font.
-# Default: Black
-FONT_OUTLINE_COLOR = (0, 0, 0, 255)
-
-# Outline thickness in pixels.
-FONT_OUTLINE_THICK = 6
-
-# Font weight.
-# Regular is 400. Typically a multiple of 100 up to 900.
-# Defaults to 600 (Semibold)
-FONT_WEIGHT = 600
-
-
-
-# Section font size in pixels
-SECTION_FONT_SIZE = 96
-
-# Main title font size in pixels
-TITLE_FONT_SIZE = 160
-
-# Font weight for title/section clips
-TITLE_FONT_WEIGHT = 700
-
-# Subtitle font size in pixels
-SUBTITLE_FONT_SIZE = 60
-
-# Subtitle font color tuple
-SUBTITLE_FONT_COLOR = (255, 255, 255, 128)
-
-# Supertitle font size in pixels
-SUPERTITLE_FONT_SIZE = 36
-
-# Supertitle font color tuple
-SUPERTITLE_FONT_COLOR = (109, 130, 186, 192)
-
-# Sub/supertitle font weight
-SUBSUPER_FONT_WEIGHT = 500
-
-# Gap between Title/Subtitle and Title/Supertitle, in pixels
-TITLE_GAP = 40
-
-
-
-# Maximum width content boxes are to be, in pixels
-MAX_CONTENT_WIDTH = 1440
-
-# Y position on screen where the text is centered.
-Y_CENTER = 860
-
-
+CFG_FILE = ""
+CFG_PROJDIR = ""
 
 #
 # Internal Vars
 #
-
-DEBUG = False
 
 errors = {
 	"general": "General Error",
@@ -147,121 +62,19 @@ modifiers = {
 	]
 }
 
-
-#
-# IMPORTS
-#
-
-from PIL import ImageFont
-import os, sys, json, math, time, uuid, hashlib, pathlib, platform
-
-CFG_FILE = ""
-CFG_PROJDIR = ""
-
 #
 # UTILITY FUNCTIONS
 #
 
 # general helpers
 
-# Prints a debug message. Will only print if the internal DEBUG variable is true.
-def pdb(msg: str):
-	if DEBUG:
-		print(f"* DEBUG: {msg}")
-
-# Prints a warning message.
-def pwrn(msg: str):
-	print(f"WARN: {msg}")
-
 # Prints the given error with the given error key.
 def print_error(error_key: str, msg: str):
 	print(f"{errors[error_key]}: {msg}")
 
-# Rounds the given value to 3 decimal places.
-def r3(value: float) -> float:
-	return round(value * 1000.0) / 1000.0
 
-# Pads an integer with a leading zero if it is less than 10.
-def pad2(val: int) -> str:
-	if (val < 10):
-		return f"0{val}"
-	return f"{val}"
 
 # titleclips_to_kdenlive Helpers
-
-# Converts the given amount of seconds to frames based on the current framerate.
-# This truncates the exact time to the nearest frame.
-def seconds_to_frames(seconds: float) -> int:
-	return int(seconds * FRAMERATE)
-
-# Converts a number of frames into a timestamp in the form hh:mm:ss:ff, where ff is
-# the frame offset within a second.
-def frames_to_timestamp(frames: int) -> str:
-	seconds: int = (frames // FRAMERATE) % 60
-	minutes: int = (frames // (FRAMERATE * 60)) % 60
-	hours: int = (frames // (FRAMERATE * 3600))
-
-	return f"{pad2(hours)}:{pad2(minutes)}:{pad2(seconds)}:{pad2(frames % FRAMERATE)}"
-
-# Converts a number of seconds into a timestamp in the form hh:mm:ss.sss
-def seconds_to_timestamp(seconds: float) -> str:
-	int_sec: int = int(math.floor(seconds))
-	minutes: int = (int_sec // 60) % 60
-	hours: int = (int_sec // 3600)
-
-	return f"{pad2(hours)}:{pad2(minutes)}:{pad2(int_sec % 60)}.{str(r3(seconds - int_sec))[2:]}"
-
-# Converts a title object which refers to a .kdenlivetitle file to a MLT producer.
-#
-# title_obj: A dictionary that stores the data for a single title clip. Get these from layout.json.
-# projdir: The directory of the project.
-# folder_id: The ID of the kdenlive project bin folder this clip will be placed in.
-# clip_id: The unique numeric ID given to this clip.
-# producer_id: The ID of the clip within the sequence it is in.
-# seq_id: The ID of the sequence this clip is in.
-#
-# Returns the XML for a producer that
-def title_to_producer(title_obj: dict, projdir: str, folder_id: int, clip_id: int, producer_id: int, seq_id: int) -> str:
-	file_hash = hashlib.md5(open(os.path.join(projdir, "titles", f"{title_obj["ref"]}.kdenlivetitle"), 'rb').read()).hexdigest()
-
-	new_uuid = uuid.uuid4()
-
-	# NOTES:
-	# producer id should be unique
-	# in/out in producer is length of clip - 1 frame
-	# length is duration_frames in frames (integer)
-	# resource is resource reference (e.g. file)
-	# kdenlive:duration_frames is duration_frames in hh:mm:ss:ff, where ff is frames
-	# id should be unique ??
-	# xml was here seems useless??
-	# clip_type is always 2 for title clips, 0 for sequence clips
-	# file_hash doesn't seem to match up with hash of the file??
-	# control_uuid is just a random UUID
-
-	# kdenlive:id (& by extension clip_id) can be seen in tractors (clip_type 0) too.
-	# producer_id is only seen in producers (clip_type 2).
-
-	return f"""<producer id="seq{seq_id}_clip{producer_id}" in="00:00:00.000" out="{seconds_to_timestamp(title_obj["duration_time"])}">
-	<property name="length">{title_obj["duration_frames"]}</property>
-	<property name="eof">pause</property>
-	<property name="resource">titles/{title_obj["ref"]}.kdenlivetitle</property>
-	<property name="meta.media.progressive">1</property>
-	<property name="aspect_ratio">1</property>
-	<property name="seekable">1</property>
-	<property name="mlt_service">kdenlivetitle</property>
-	<property name="kdenlive:duration">{seconds_to_timestamp(title_obj["duration_full"])}</property>
-	<property name="kdenlive:duration_frames">{frames_to_timestamp(title_obj["duration_frames"])}</property>
-	<property name="xml">was here</property>
-	<property name="kdenlive:folderid">{folder_id}</property>
-	<property name="kdenlive:id">{clip_id}</property>
-	<property name="kdenlive:control_uuid">{{{new_uuid}}}</property>
-	<property name="kdenlive:clip_type">2</property>
-	<property name="kdenlive:file_hash">{file_hash}</property>
-	<property name="force_reload">0</property>
-	<property name="meta.media.width">{RES_WIDTH}</property>
-	<property name="meta.media.height">{RES_HEIGHT}</property>
-	<property name="kdenlive:monitorPosition">0</property>
-</producer>\n"""
 
 # Creates the XML for three blank tracks, two audio and one video.
 # This creates all necessary producers, playlists, and tractors.
@@ -502,29 +315,6 @@ def create_sequence(seq_idx: int, sequence: list[dict], start_id: int, folder_ob
 		"seq_dur": sequence_len,
 		"before_pause": sequence[0]["modifiers"]["before_pause"] if "before_pause" in sequence[0]["modifiers"] else SECTION_GAP
 	})
-
-# Converts a layout object (as saved in layout.json) to a list of sequences.
-#
-# layout: The layout data for a video, acquired by using json.loads on the contents
-# of the layout.json file.
-def layout_to_sequences(layout: list[dict]) -> list[list[dict]]:
-	sections = [[]]
-	section = 0
-
-	# Iterate through clips
-	for clip in layout:
-		# Create new section if section clip, otherwise add to existing section
-		if clip["ref"][:7] == "section":
-			section += 1
-			sections.append([clip])
-		else:
-			sections[section].append(clip)
-
-	# Move title section to end
-	sections.append(sections[0])
-	del sections[0]
-
-	return sections
 
 
 # clip_data_to_titleclips Helpers
@@ -902,7 +692,7 @@ def titleclips_to_kdenlive(projdir):
 
 	# Get all clips and arrange by what sequence they will be put in.
 	# The last sequence in this list shall be the main sequence.
-	sequences = layout_to_sequences(layout)
+	sequences = layout_to_sequences(layout, title_last = True)
 
 	seq_data = []
 
@@ -1590,12 +1380,15 @@ def parse_file(f):
 # longhand: The flag's full name (e.g. help)
 def get_flag_idx(shorthand: str, longhand: str) -> int:
 	try:
-		return sys.argv.index(f"-{shorthand}")
+		return sys.argv.index(f"--{longhand}")
 	except:
-		try:
-			return sys.argv.index(f"--{longhand}")
-		except:
-			return -1
+		if (shorthand != ""):
+			try:
+				return sys.argv.index(f"-{shorthand}")
+			except:
+				pass
+
+	return -1
 
 # Gets the argument for the given flag.
 # Note: This does not work for longhand arguments adjacent to the flag, e.g. --opt=2
@@ -1629,6 +1422,8 @@ def parse_flags():
 		print("  -n\t")
 		print("  --no-proj\tDo not create a project file in this run. Only title clips will be")
 		print("              \tcreated or modified.")
+		print("  --force-regen\tDelete and recreate the project file from scratch. This will")
+		print("               \tdelete any changes to the video outside of the title clips.")
 		sys.exit()
 
 
@@ -1639,6 +1434,7 @@ def main():
 	CFG_PROJDIR = get_flag_arg("d", "directory")
 
 	NO_PROJECT = get_flag_idx("n", "no-proj") != -1
+	REGEN = get_flag_idx("", "force-regen") != -1
 
 	if not os.path.isfile(CFG_FILE) or not os.path.isdir(CFG_PROJDIR):
 		if os.path.isfile(CFG_FILE):
@@ -1659,7 +1455,14 @@ def main():
 	clip_data_to_titleclips(cdata, CFG_PROJDIR)
 
 	if (not NO_PROJECT):
-		print("Creating Project...")
-		titleclips_to_kdenlive(CFG_PROJDIR)
+		if (not(REGEN) and os.path.isfile(os.path.join(CFG_PROJDIR, "project.kdenlive"))):
+			print("Modifying Project...")
+			adjust_titles_in_place(
+				projfile = os.path.join(CFG_PROJDIR, "project.kdenlive"),
+				layoutfile = os.path.join(CFG_PROJDIR, "titles", "layout.json")
+			)
+		else:
+			print("Creating New Project...")
+			titleclips_to_kdenlive(CFG_PROJDIR)
 
 main()
