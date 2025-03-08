@@ -17,6 +17,161 @@ def id_to_seqclip_pair(clipid: str) -> [int, int]:
 
 
 
+# Adjusts the items in the playlist pl so that it matches the updated layout.
+#
+# pl: The playlist to modify.
+# ptree: The root ElementTree containing the entire project.
+# projfile: The URL of the project file.
+# producer_durs: A dictionary of durations for each producer.
+# seq_layout: The layout data for the corresponding sequence.
+# seq_idx: The index of the corresponding sequence
+# found: The number of entries already in this playlist, minus one.
+# base_id: The next free unique numeric ID, minus one.
+# num_to_add: The amount of clips to add.
+# num_to_delete: The amount of clips to delete. num_to_delete is 0 iff num_to_add is not 0.
+#
+# Returns the total duration of the new playlist.
+def modify_playlist(pl, ptree, projfile: str, producer_durs: dict, seq_layout: list[dict], seq_idx: int, found: int, base_id: int, num_to_add: int, num_to_delete: int) -> float:
+	# Check if we need to create any new titles before we modify the playlist.
+	if (num_to_add > 0):
+		# Looks like we need to create some new titles!
+		pdb(f"Creating New Titles for Sequence {seq_idx}")
+
+		# Get the folder ID by looking it up from the first entry.
+		# This produces a warning which I ignore.
+		folder_id = ptree.getroot().find(f"producer[@id='{pl[0].get("producer")}']").find("property[@name='kdenlive:folderid']").text
+
+		# Create and add each producer to the tree & playlist
+		for i in range(num_to_add):
+			clip_data = seq_layout[found + i + 1]
+
+			# Generate Producer XML
+			producer_str = title_to_producer(
+				title_obj = clip_data,
+				projdir = os.path.dirname(projfile),
+				folder_id = folder_id,
+				clip_id = (base_id + 1) + i,
+				producer_id = found + i + 1,
+				seq_id = seq_idx
+			)
+
+			# Add the producer to the tree
+			ptree.getroot().insert(ptree.getroot().index(ptree.getroot().find(f"producer[@id='seq{seq_idx}_clip{found}']")) + 1, etree.fromstring(producer_str))
+
+			# Also add it to the main_bin entry list.
+			main_bin_entry_str = main_bin_entry(
+				seq_id = seq_idx,
+				pl_id = found + i + 1,
+				duration = clip_data["duration_time"]
+			)
+			main_bin = ptree.getroot().find("playlist[@id='main_bin']")
+			main_bin.insert(main_bin.index(main_bin.find(f"entry[@producer='seq{seq_idx}_clip{found}']")) + 1, etree.fromstring(main_bin_entry_str))
+
+			producer_durs[f"seq{seq_idx}_clip{found + i + 1}"] = {
+				"out": clip_data["duration_time"],
+				"full": clip_data["duration_full"]
+			}
+
+			# Insert the producer into the playlist
+			# Note that since we know our playlist was found, it has at least one element
+			# and therefore the new item is a content clip.
+
+			# Create Entry
+			entry_str = playlist_entry(
+				seq_id = seq_idx,
+				pl_id = found + i + 1,
+				unique_id = (base_id + 1) + i,
+				duration = clip_data["duration_time"],
+				fade_dur = FADE_DURATION
+			)
+
+			# Get blank length
+			blank_len = CONTENT_GAP
+			if ("before_pause" in clip_data["modifiers"]):
+				blank_len = clip_data["modifiers"]["before_pause"]
+
+			# Add a new blank and the entry to the playlist.
+			pl.append(etree.fromstring(playlist_blank(blank_len)))
+			pl.append(etree.fromstring(entry_str))
+
+			pdb(f"Added Title {found + 1 + i}")
+
+
+	# Adjust existing elements of the playlist.
+	# While doing so, track the new length of the sequence.
+	this_len = 0.0
+
+	for i in range(0, len(seq_layout) * 2, 2):
+		durations = producer_durs[pl[i].get("producer")]
+
+		# Adjust Entry
+		# Adjust out
+		pl[i].set("out", seconds_to_timestamp(durations["out"]))
+
+		# Adjust fades
+		# Fade-out filter
+		pl[i].find("filter[@in]").set("in", seconds_to_timestamp(durations["out"] - FADE_DURATION))
+		pl[i].find("filter[@in]").set("out", seconds_to_timestamp(durations["out"]))
+		# Fade-in filter
+		pl[i].xpath("filter[not(@in)]")[0].set("out", seconds_to_timestamp(FADE_DURATION))
+
+		this_len += durations["full"]
+		if (i > 0):
+			# Additionally handle and adjust gap before
+			gap_size = FADE_DURATION
+			if ("before_pause" in seq_layout[i // 2]["modifiers"]):
+				gap_size = seq_layout[i // 2]["modifiers"]["before_pause"]
+
+			pl[i - 1].set("length", seconds_to_timestamp(gap_size))
+			this_len += gap_size
+
+	# Delete elements of the playlist to be removed.
+	if (num_to_delete > 0):
+		for i in range(num_to_delete):
+			pl.remove(pl[len(seq_layout) * 2])
+			pl.remove(pl[len(seq_layout) * 2 - 1])
+
+	pdb(f"Playlist {pl.get('id')} Regenerated: {this_len}")
+
+	return this_len
+
+
+
+# Recalculates the length of the sequence tractor and sets all corresponding values based on that.
+#
+# seq_trac: The sequence tractor to modify
+# baseline_len: The length of the title clip track of the sequence.
+#
+# Returns the new length of the sequence.
+def modify_sequence_tractor(seq_trac, ptree, baseline_len: float) -> float:
+	# First, find the longest track length. This is the length of the entire sequence.
+	longest_len = baseline_len
+	track_ids = seq_trac.xpath("track[position() > 1]/@producer")
+	for tid in track_ids:
+		track = ptree.xpath(f"/mlt/tractor[@id='{tid}']")[0]
+		if ("out" in track.attrib):
+			track_dur = timestamp_to_seconds(track.get("out"))
+			if (track_dur > longest_len):
+				longest_len = track_dur
+
+	longest_len = r3(longest_len)
+
+	# Set this sequence's length everywhere it's used.
+	seq_trac.set("out", seconds_to_timestamp(longest_len - 1 / FRAMERATE))
+	seq_trac.find("property[@name='kdenlive:duration']").text = seconds_to_timestamp(longest_len)
+	seq_trac.find("property[@name='kdenlive:maxduration']").text = str(seconds_to_frames(longest_len))
+	seq_trac.find("property[@name='kdenlive:sequenceproperties.zoneout']").text = str(seconds_to_frames(longest_len))
+
+	# Adjust the entry in main_bin.
+	main_bin_entry = ptree.xpath(f"/mlt/playlist[@id='main_bin']/entry[@producer='{seq_trac.get("id")}']")[0]
+	main_bin_entry.set("out", seconds_to_timestamp(longest_len - 1 / FRAMERATE))
+
+	pdb(f"New Length of Sequence {seq_trac.get("id")} Calculated: {longest_len}\n")
+
+	return longest_len
+
+
+
 # Attempts to adjust the title clip tracks inside the given kdenlive project file
 # so that they match the layout seen in the given layout.json file.
 #
@@ -161,108 +316,21 @@ def adjust_titles_in_place(projfile: str, layoutfile: str) -> int:
 			# index in the main playlist.
 			seq_idx = int(seq_trac.find("property[@name='kdenlive:clipname']").text[9:])
 
-			# Check if we need to create any new titles before we modify the playlist.
-			if (seq_idx in to_add):
-				# Looks like we need to create some new titles!
-				pdb(f"Creating New Titles for Sequence {seq_idx}")
+			# Edit the playlist.
+			this_len = modify_playlist(
+				pl = pl,
+				ptree = ptree,
+				projfile = projfile,
+				producer_durs = producer_durs,
+				seq_layout = layout[seq_idx],
+				seq_idx = seq_idx,
+				found = found[seq_idx],
+				base_id = base_id,
+				num_to_add = to_add[seq_idx] if seq_idx in to_add else 0,
+				num_to_delete = to_delete[seq_idx] if seq_idx in to_delete else 0
+			)
 
-				# Get the folder ID by looking it up from the first entry.
-				# This produces a warning which I ignore.
-				folder_id = ptree.getroot().find(f"producer[@id='{pl[0].get("producer")}']").find("property[@name='kdenlive:folderid']").text
-
-				# Create and add each producer to the tree & playlist
-				for i in range(to_add[seq_idx]):
-					clip_data = layout[seq_idx][found[seq_idx] + i + 1]
-
-					# Generate Producer XML
-					producer_str = title_to_producer(
-						title_obj = clip_data,
-						projdir = os.path.dirname(projfile),
-						folder_id = folder_id,
-						clip_id = (base_id + 1) + i,
-						producer_id = found[seq_idx] + i + 1,
-						seq_id = seq_idx
-					)
-
-					# Add the producer to the tree
-					ptree.getroot().insert(ptree.getroot().index(ptree.getroot().find(f"producer[@id='seq{seq_idx}_clip{found[seq_idx]}']")) + 1, etree.fromstring(producer_str))
-
-					# Also add it to the main_bin entry list.
-					main_bin_entry_str = main_bin_entry(
-						seq_id = seq_idx,
-						pl_id = found[seq_idx] + i + 1,
-						duration = clip_data["duration_time"]
-					)
-					main_bin = ptree.getroot().find("playlist[@id='main_bin']")
-					main_bin.insert(main_bin.index(main_bin.find(f"entry[@producer='seq{seq_idx}_clip{found[seq_idx]}']")) + 1, etree.fromstring(main_bin_entry_str))
-
-					producer_durs[f"seq{seq_idx}_clip{found[seq_idx] + i + 1}"] = {
-						"out": clip_data["duration_time"],
-						"full": clip_data["duration_full"]
-					}
-
-					# Insert the producer into the playlist
-					# Note that since we know our playlist was found, it has at least one element
-					# and therefore the new item is a content clip.
-
-					# Create Entry
-					entry_str = playlist_entry(
-						seq_id = seq_idx,
-						pl_id = found[seq_idx] + i + 1,
-						unique_id = (base_id + 1) + i,
-						duration = clip_data["duration_time"],
-						fade_dur = FADE_DURATION
-					)
-
-					# Get blank length
-					blank_len = CONTENT_GAP
-					if ("before_pause" in clip_data["modifiers"]):
-						blank_len = clip_data["modifiers"]["before_pause"]
-
-					# Add a new blank and the entry to the playlist.
-					pl.append(etree.fromstring(playlist_blank(blank_len)))
-					pl.append(etree.fromstring(entry_str))
-
-					pdb(f"Added Title {found[seq_idx] + 1 + i}")
-
-				base_id += to_add[seq_idx]
-
-
-			# Adjust existing elements of the playlist.
-			# While doing so, track the new length of the sequence.
-			this_len = 0.0
-
-			for i in range(0, len(layout[seq_idx]) * 2, 2):
-				durations = producer_durs[pl[i].get("producer")]
-
-				# Adjust Entry
-				# Adjust out
-				pl[i].set("out", seconds_to_timestamp(durations["out"]))
-
-				# Adjust fades
-				# Fade-out filter
-				pl[i].find("filter[@in]").set("in", seconds_to_timestamp(durations["out"] - FADE_DURATION))
-				pl[i].find("filter[@in]").set("out", seconds_to_timestamp(durations["out"]))
-				# Fade-in filter
-				pl[i].xpath("filter[not(@in)]")[0].set("out", seconds_to_timestamp(FADE_DURATION))
-
-				this_len += durations["full"]
-				if (i > 0):
-					# Additionally handle and adjust gap before
-					gap_size = FADE_DURATION
-					if ("before_pause" in layout[seq_idx][i // 2]["modifiers"]):
-						gap_size = layout[seq_idx][i // 2]["modifiers"]["before_pause"]
-
-					pl[i - 1].set("length", seconds_to_timestamp(gap_size))
-					this_len += gap_size
-
-			# Delete elements of the playlist to be removed.
-			if (seq_idx in to_delete):
-				for i in range(to_delete[seq_idx]):
-					pl.remove(pl[len(layout[seq_idx]) * 2])
-					pl.remove(pl[len(layout[seq_idx]) * 2 - 1])
-
-			pdb(f"Playlist {pl.get('id')} Regenerated.")
+			base_id += to_add[seq_idx] if seq_idx in to_add else 0
 
 
 			# Modify the tractor containing this playlist.
@@ -272,33 +340,87 @@ def adjust_titles_in_place(projfile: str, layoutfile: str) -> int:
 			# length of the longest track.
 
 			# First, find the longest track length.
-			longest_len = this_len
-			track_ids = seq_trac.xpath("track[position() > 1]/@producer")
-			for tid in track_ids:
-				track = ptree.xpath(f"/mlt/tractor/track[@producer='{tid}']/..")[0]
-				if ("out" in track.attrib):
-					track_dur = timestamp_to_seconds(track.get("out"))
-					if (track_dur > longest_len):
-						longest_len = track_dur
-
-			# Set this sequence's length everywhere it's used.
-			seq_trac.set("out", seconds_to_timestamp(longest_len - 1 / FRAMERATE))
-			seq_trac.find("property[@name='kdenlive:duration']").text = seconds_to_timestamp(longest_len)
-			seq_trac.find("property[@name='kdenlive:maxduration']").text = str(seconds_to_frames(longest_len))
-			seq_trac.find("property[@name='kdenlive:sequenceproperties.zoneout']").text = str(seconds_to_frames(longest_len))
+			longest_len = modify_sequence_tractor(
+				seq_trac = seq_trac,
+				baseline_len = this_len,
+				ptree = ptree,
+			)
 
 			# Save the sequence length for later, using the UUID of the sequence for ease of
 			# access.
-			seq_times[seq_trac.get("id")] = r3(longest_len)
+			seq_times[seq_trac.get("id")] = {
+				"len": longest_len,
+				"before_gap": layout[seq_idx][0]["modifiers"]["before_pause"] if "before_pause" in layout[seq_idx][0]["modifiers"] else SECTION_GAP
+			}
 
 			pdb(f"Corresponding Sequence Regenerated.\n")
 
-		print(seq_times)
 
-		print(main_seq_idx)
+		# Now it's time to adjust the main sequence.
+		# First get the video and audio track playlists. We will need to adjust both.
+		pdb(f"Modifying Main Sequence & Playlist...\n")
 
-		#print(etree.tostring(ptree.getroot().find("playlist[@id='main_bin']"), pretty_print=True).decode())
+		mpl_v = seq_plays[main_seq_idx]
+		mpl_a = ptree.xpath(f"/mlt/playlist[@id!='main_bin']/entry[contains(@producer, '{list(seq_times.keys())[0]}')]/../property[@name='kdenlive:audio_track']/..")[0]
 
+		# Adjust the intro clips in the video playlist.
+		main_len = modify_playlist(
+			pl = mpl_v,
+			ptree = ptree,
+			projfile = projfile,
+			producer_durs = producer_durs,
+			seq_layout = layout[0],
+			seq_idx = seq_idx,
+			found = found[0],
+			base_id = base_id,
+			num_to_add = to_add[0] if 0 in to_add else 0,
+			num_to_delete = to_delete[0] if 0 in to_delete else 0
+		)
+
+		# Now adjust the rest of each playlist.
+		main_len_full = main_len
+		for i in range(len(seq_times)):
+			seq_uuid = mpl_a[i * 2 + 2].get("producer")
+
+			# Adjust gap before
+			b_gap = seq_times[seq_uuid]["before_gap"]
+			mpl_v[found[0] * 2 + i * 2 + 1].set("length", seconds_to_timestamp(b_gap))
+			main_len_full += b_gap
+
+			if (i == 0):
+				b_gap += main_len
+			mpl_a[i * 2 + 1].set("length", seconds_to_timestamp(b_gap))
+
+			# Adjust length of sequence itself
+			seq_len = seq_times[seq_uuid]["len"]
+
+			mpl_a[i * 2 + 2].set("out", seconds_to_timestamp(seq_len))
+			mpl_v[found[0] * 2 + i * 2 + 2].set("out", seconds_to_timestamp(seq_len))
+			main_len_full += seq_len
+
+		# With both playlists set, modify BOTH corresponding tractors.
+		main_v_trac = ptree.xpath(f"/mlt/tractor/track[@producer='{mpl_v.get("id")}']/..")[0]
+		main_v_trac.set("out", seconds_to_timestamp(main_len_full - 1 / FRAMERATE))
+		main_a_trac = ptree.xpath(f"/mlt/tractor/track[@producer='{mpl_a.get("id")}']/..")[0]
+		main_a_trac.set("out", seconds_to_timestamp(main_len_full - 1 / FRAMERATE))
+
+		# Modify the sequence tractor.
+		main_seq_trac = ptree.xpath(f"/mlt/tractor/track[@producer='{main_v_trac.get("id")}']/..")[0]
+		main_seq_len = modify_sequence_tractor(
+			seq_trac = main_seq_trac,
+			baseline_len = main_len_full,
+			ptree = ptree
+		)
+
+		# Finally, modify the project tractor.
+		proj_trac = ptree.xpath(f"/mlt/tractor/track[@producer='{main_seq_trac.get("id")}']/..")[0]
+		proj_trac.set("out", seconds_to_timestamp(main_seq_len))
+		proj_trac.find("track").set("out", seconds_to_timestamp(main_seq_len))
+
+		pdb(f"Modifications Complete! Saving...\n")
+
+		with open("TESTING/project_NEW.kdenlive", "w") as new_projfile:
+			new_projfile.write(etree.tostring(ptree, pretty_print=True).decode())
 
 	return 0
 
